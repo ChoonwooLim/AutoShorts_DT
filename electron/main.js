@@ -8,13 +8,19 @@ import getPort from 'get-port';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production';
+const rendererUrl = process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL;
+
+// 개발 모드에서 Vite https 인증서 무시
+if (isDev) {
+  app.commandLine.appendSwitch('ignore-certificate-errors');
+}
 
 function resolveRootPath(...segments) {
   return path.join(__dirname, '..', ...segments);
 }
 
 function resolveDistAppPath(...segments) {
-  return path.join(__dirname, '..', 'dist-app', ...segments);
+  return path.join(__dirname, '..', 'dist', ...segments);
 }
 
 // 안전한 file:// 경로 생성
@@ -49,28 +55,32 @@ async function createWindow() {
     return { action: 'deny' };
   });
 
-  // dist-app이 있으면 우선 서빙, 없으면 프로젝트 루트 서빙
+  // dist가 있으면 우선 서빙, 없으면 프로젝트 루트 서빙
   const serveRoot = fs.existsSync(resolveDistAppPath('index.html')) ? resolveDistAppPath() : resolveRootPath();
 
-  // 모든 환경에서 로컬 HTTP 서버로 정적 자산 제공
-  const port = await getPort({ port: [5123, 5124, 5125, 0] });
-  const server = http.createServer((request, response) => {
-    return handler(request, response, {
-      public: serveRoot,
-      cleanUrls: true,
-      directoryListing: false,
-      headers: [
-        { source: '**/*.js', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
-        { source: '**/*.css', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
-        { source: '**/*.wasm', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] }
-      ]
+  if (isDev && rendererUrl) {
+    await win.loadURL(rendererUrl);
+  } else {
+    // 모든 환경에서 로컬 HTTP 서버로 정적 자산 제공
+    const port = await getPort({ port: [5123, 5124, 5125, 0] });
+    const server = http.createServer((request, response) => {
+      return handler(request, response, {
+        public: serveRoot,
+        cleanUrls: true,
+        directoryListing: false,
+        headers: [
+          { source: '**/*.js', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
+          { source: '**/*.css', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
+          { source: '**/*.wasm', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] }
+        ]
+      });
     });
-  });
-  await new Promise((resolve, reject) => {
-    server.listen(port, (err) => (err ? reject(err) : resolve()));
-  });
-  const appUrl = `http://localhost:${port}/index.html`;
-  await win.loadURL(appUrl);
+    await new Promise((resolve, reject) => {
+      server.listen(port, (err) => (err ? reject(err) : resolve()));
+    });
+    const appUrl = `http://localhost:${port}/index.html`;
+    await win.loadURL(appUrl);
+  }
   if (isDev) {
     win.webContents.openDevTools({ mode: 'detach' });
   }

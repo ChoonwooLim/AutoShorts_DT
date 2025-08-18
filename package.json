@@ -5,15 +5,26 @@
   "description": "AutoShorts Web Application",
   "type": "module",
   "homepage": "./",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "cross-env NODE_ENV=development electron .",
+    "dev:electron": "concurrently -k \"vite\" \"cross-env NODE_ENV=development ELECTRON_RENDERER_URL=https://localhost:5173 electron .\"",
+    "build:app": "cross-env BUILD_TARGET=electron vite build",
+    "electron:preview": "cross-env NODE_ENV=production electron .",
+    "dist": "npm run build:app && cross-env NODE_ENV=production electron-builder -w"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "^1.1.0",
     "vite": "^5.4.19",
-    "vite-plugin-static-copy": "^3.1.1"
+    "vite-plugin-static-copy": "^3.1.1",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.9.1",
+    "cross-env": "^7.0.3",
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0"
   },
   "dependencies": {
     "@ffmpeg/core-mt": "^0.12.10",
@@ -23,6 +34,28 @@
     "@tensorflow/tfjs": "^4.20.0",
     "d3-scale": "^4.0.2",
     "face-api.js": "^0.22.2",
-    "natural": "^5.0.0"
+    "natural": "^5.0.0",
+    "get-port": "^7.1.0",
+    "serve-handler": "^6.1.5"
+  },
+  "build": {
+    "appId": "org.twinverse.autoshorts",
+    "productName": "AutoShorts",
+    "asar": true,
+    "files": [
+      "dist/**",
+      "electron/**",
+      "image/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "image/AutoShortsIco.ico",
+      "artifactName": "${productName}-${version}-Setup.${ext}"
+    }
   }
 }

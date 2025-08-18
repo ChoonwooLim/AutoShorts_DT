@@ -127,30 +127,28 @@ export async function ensureLibrariesLoaded() {
     const getLibraryPath = () => {
         const hostname = window.location.hostname;
         const port = window.location.port;
+        const isElectron = !!(window.env && window.env.isElectron);
         
-        console.log(`🌍 현재 환경: ${hostname}:${port}`);
+        console.log(`🌍 현재 환경: ${hostname}:${port} (electron=${isElectron})`);
         
-        if (hostname === 'localhost' && port === '3000') {
-            // 메인 서버에서 실행될 때
-            const path = '/AutoShortsWeb/public/js/vendor/face-api.js';
-            console.log(`🔗 로컬 Express 서버 경로: ${path}`);
-            return path;
-        } else if (hostname === 'localhost' && port === '5173') {
-            // Vite 개발 서버에서 실행될 때
-            const path = '/public/js/vendor/face-api.js';
-            console.log(`🔗 Vite 개발 서버 경로: ${path}`);
-            return path;
-        } else if (hostname === 'twinverse.org' || hostname === 'www.twinverse.org') {
-            // 프로덕션 환경
-            const path = '/AutoShortsWeb/public/js/vendor/face-api.js';
-            console.log(`🔗 프로덕션 환경 경로: ${path}`);
-            return path;
-        } else {
-            // 기본값
+        // Vite 개발 서버 또는 Electron 개발 환경에서는 Vite의 public 매핑을 사용
+        if ((hostname === 'localhost' && port === '5173') || isElectron) {
             const path = '/js/vendor/face-api.js';
-            console.log(`🔗 기본 경로: ${path}`);
+            console.log(`🔗 개발/Electron 경로: ${path}`);
             return path;
         }
+        
+        // GitHub Pages(프로덕션 웹)
+        if (hostname === 'twinverse.org' || hostname === 'www.twinverse.org') {
+            const path = '/AutoShortsWeb/js/vendor/face-api.js';
+            console.log(`🔗 프로덕션 웹 경로: ${path}`);
+            return path;
+        }
+        
+        // 기본값: 배포된 정적 서버 루트
+        const path = '/js/vendor/face-api.js';
+        console.log(`🔗 기본 경로: ${path}`);
+        return path;
     };
     
     try {

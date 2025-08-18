@@ -24,7 +24,9 @@ export default defineConfig({
     host: true,
     cors: true
   },
-  base: process.env.NODE_ENV === 'production' ? '/AutoShortsWeb/' : '/',
+  base: process.env.BUILD_TARGET === 'electron'
+    ? './'
+    : (process.env.NODE_ENV === 'production' ? '/AutoShortsWeb/' : '/'),
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
@@ -34,6 +36,14 @@ export default defineConfig({
           vendor: ['@tensorflow/tfjs', 'face-api.js'],
           ffmpeg: ['@ffmpeg/ffmpeg', '@ffmpeg/core-mt']
         }
+      }
+    }
+  },
+  worker: {
+    format: 'es',
+    rollupOptions: {
+      output: {
+        inlineDynamicImports: true
       }
     }
   },
