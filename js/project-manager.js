@@ -1,7 +1,8 @@
 // js/project-manager.js
 import { state } from './state.js';
 import { showUploadedFile, updateVideoControls } from './ui-file.js';
-import { addSubtitleEntryWithTimestamp } from './simple-transcription.js';
+// Transcription removed: stubbed import
+const addSubtitleEntryWithTimestamp = () => {};
 
 // DOM 관련 코드는 더 이상 필요 없으므로 삭제합니다.
 

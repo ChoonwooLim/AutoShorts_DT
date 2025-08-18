@@ -1,7 +1,7 @@
 ﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https: 'unsafe-inline'; script-src 'self' https: 'unsafe-inline'; connect-src 'self' https: data: blob: file: https://apis.google.com https://accounts.google.com; img-src 'self' data: blob: https: file:; style-src 'self' 'unsafe-inline' https:; media-src 'self' blob: data: https: file:; worker-src 'self' blob:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https: 'unsafe-inline'; script-src 'self' https: blob: 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self' https: data: blob: file: https://apis.google.com https://accounts.google.com; img-src 'self' data: blob: https: file:; style-src 'self' 'unsafe-inline' https:; media-src 'self' blob: data: https: file:; worker-src 'self' blob:;">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VisionCut.AI</title>
@@ -95,7 +95,7 @@
                         </select>
                     </div>
                 </div>
-                <div class="subtitle-control-panel">
+                <div class="subtitle-control-panel" style="display: none;">
                     <div class="subtitle-header">
                         <h3>🎙️ 자막 추출 설정</h3>
                     </div>
@@ -112,7 +112,7 @@
                         </div>
                     </div>
                      <div class="subtitle-controls">
-                        <button id="startTranscriptionBtn" class="action-btn" disabled onclick="loadTranscriptionModules()">🎙️ 자막 추출 시작</button>
+                        <button id="startTranscriptionBtn" class="action-btn" disabled style="display:none" aria-hidden="true">🎙️ 자막 추출 시작</button>
                         <div class="language-selector">
                             <label for="sourceLang">언어:</label>
                             <select id="sourceLang">
@@ -121,12 +121,12 @@
                             </select>
                         </div>
                     </div>
-                    <div class="transcription-progress" id="transcriptionProgress" style="display: none;">
+                    <div class="transcription-progress" id="transcriptionProgress" style="display: none; visibility: hidden;" aria-hidden="true">
                         <div class="progress-bar"><div class="progress-fill" id="transcriptionProgressFill"></div></div>
                         <div class="progress-text" id="transcriptionProgressText">자막 추출 준비 중...</div>
                         <div class="progress-details" id="transcriptionProgressDetails"></div>
                     </div>
-                    <div id="subtitleContainer" class="subtitle-container" style="display: none;">
+                    <div id="subtitleContainer" class="subtitle-container" style="display: none; visibility: hidden;" aria-hidden="true">
                         <div class="subtitle-placeholder">동영상 업로드 후 "자막 추출 시작" 버튼을 클릭하세요.</div>
                     </div>
                 </div>
@@ -301,8 +301,8 @@
                     <div id="shorts-counter"></div>
                     <div id="completedShortsGrid" style="display: none;"></div>
                 </div>
-                <div class="results-lower-section">
-                    <div class="subtitle-results-header">
+                <div class="results-lower-section" style="display: none;">
+                    <div class="subtitle-results-header" aria-hidden="true">
                         <h3>📝 추출된 자막</h3>
                         <div class="subtitle-actions">
                             <button id="copySubtitleBtn" class="subtitle-action-btn" title="자막 복사">📋</button>
@@ -310,7 +310,7 @@
                             <button id="clearSubtitleBtn" class="subtitle-action-btn" title="자막 지우기">🗑️</button>
                         </div>
                     </div>
-                    <div class="subtitle-results-container" id="subtitleResultsContainer">
+                    <div class="subtitle-results-container" id="subtitleResultsContainer" aria-hidden="true">
                         <div class="subtitle-placeholder-results"><div class="placeholder-icon">🎙️</div><p>영상을 업로드하고 자막 추출을 시작하세요</p><span>추출된 자막이 여기에 표시됩니다</span></div>
                     </div>
                 </div>

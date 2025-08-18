@@ -33,28 +33,11 @@ window.loadFileModules = async function() {
     }
 };
 
-// Global function for loading and starting transcription modules
+// Global function for loading and starting transcription modules (disabled)
 window.loadTranscriptionModules = async function() {
-    try {
-        const transcriptionModule = await lazyLoader.loadModule('simple-transcription', () => import('./simple-transcription.js'));
-        if (transcriptionModule?.initializeTranscription) {
-            await transcriptionModule.initializeTranscription();
-        }
-        if (transcriptionModule?.setupSimpleTranscriptionEventListeners) {
-            transcriptionModule.setupSimpleTranscriptionEventListeners();
-        }
-        // Ensure button enabled and container visible
-        const btn = document.getElementById('startTranscriptionBtn');
-        const container = document.getElementById('subtitleContainer');
-        if (btn) btn.disabled = false;
-        if (container) container.style.display = 'block';
-        // Do not auto-start; wait for user click to avoid unexpected runs
-        return true;
-    } catch (error) {
-        console.error('❌ Failed to load transcription modules:', error);
-        alert('자막 모듈 로딩에 실패했습니다. 콘솔을 확인해주세요.');
-        return false;
-    }
+    console.warn('🔇 Transcription feature is disabled.');
+    alert('자막 추출 기능이 비활성화되었습니다.');
+    return false;
 };
 
 /**
@@ -91,19 +74,7 @@ async function main() {
         setupChatEventListeners(); // 이벤트 리스너 설정 추가
         console.log('💬 Chat system initialized.');
         
-        // Transcription system
-        const transcriptionModule = await lazyLoader.loadModule('simple-transcription', () => import('./simple-transcription.js'));
-        if (transcriptionModule && transcriptionModule.initializeTranscription) {
-            transcriptionModule.initializeTranscription();
-            console.log('🎙️ Transcription system initialized.');
-        }
-        
-        // Audio extraction system
-        const audioExtractionModule = await lazyLoader.loadModule('audio-extraction', () => import('./audio-extraction.js'));
-        if (audioExtractionModule && audioExtractionModule.initializeAudioExtraction) {
-            audioExtractionModule.initializeAudioExtraction();
-            console.log('🔊 Audio extraction system initialized.');
-        }
+        // Transcription system disabled
         
         // Face analysis system
         const faceAnalysisModule = await lazyLoader.loadModule('face-analysis', () => import('./face-analysis.js'));
@@ -323,7 +294,6 @@ async function initializeFaceAnalysisSystem() {
  */
 function setupBackgroundPreloading() {
     lazyLoader.addToPreloadQueue('ui-processing', () => import('./ui-processing.js'));
-    lazyLoader.addToPreloadQueue('simple-transcription', () => import('./simple-transcription.js'));
     lazyLoader.addToPreloadQueue('shorts-processing', () => import('./shorts-processing-real.js'));
     // Removed preloading for 'face-analyzer-new.js' to avoid potential race conditions.
     // lazyLoader.addToPreloadQueue('face-analyzer-new', () => import('./face-analyzer-new.js'));

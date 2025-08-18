@@ -471,17 +471,34 @@ async function convertToCompressedAudio(audioData, sampleRate, method) {
     } catch (error) {
         console.error(`❌ ${method} 압축 실패:`, error);
         console.log(`📋 ${method} 오류 상세:`, error.message);
+        console.log('🔄 기본 MediaRecorder로 폴백...');
         
-        // FFmpeg.wasm 실패 시 자동 폴백 금지 - 바로 종료
-        if (method === 'ffmpeg-wasm') {
-            updateTranscriptionProgress(0, '❌ FFmpeg.wasm 실패', error.message);
-            throw new Error(`FFmpeg.wasm 실패: ${error.message}`);
+        // 실패 시 기본 방식으로 폴백
+        try {
+            updateTranscriptionProgress(42, '🔄 폴백 처리 중...', 'MediaRecorder로 안전하게 처리');
+            return await compressWithMediaRecorder(audioData, sampleRate);
+        } catch (fallbackError) {
+            // 통합 에러 처리 시스템 사용
+            if (window.errorHandler) {
+                window.errorHandler.handleError({
+                    type: 'audio',
+                    message: fallbackError.message,
+                    originalError: fallbackError,
+                    context: { 
+                        function: 'convertToCompressedAudio',
+                        compressionMethod: method,
+                        audioDataLength: audioData.length
+                    },
+                    severity: 'medium'
+                });
+            }
+            
+            console.error('❌ 폴백도 실패:', fallbackError);
+            // 최후의 수단: WAV 형식 그대로 반환
+            console.log('🔄 WAV 형식으로 최종 폴백...');
+            updateTranscriptionProgress(50, '⚠️ WAV 형식 사용', '압축 없이 원본 형식 유지');
+            return createWavBlob(audioData, sampleRate);
         }
-        
-        // 다른 방식(web-workers, mediarecorder)에서만 폴백 허용
-        console.log('🔄 MediaRecorder로 폴백 시도...');
-        updateTranscriptionProgress(42, '🔄 폴백 처리 중...', 'MediaRecorder로 안전하게 처리');
-        return await compressWithMediaRecorder(audioData, sampleRate);
     }
 }
 
@@ -552,81 +569,92 @@ async function compressWithFFmpegWasm(audioData, sampleRate) {
         let FFmpegModule;
         console.log('🔧 FFmpeg.wasm 라이브러리 로드 시작...');
         
-        // Electron/Vite 환경: 로컬 번들/정적 경로 우선 (CSP, COEP/COOP 충돌 방지)
         try {
-            // 정식 패키지 ESM 로드
-            FFmpegModule = await import('@ffmpeg/ffmpeg');
-            console.log('✅ 패키지 FFmpeg 로드 성공');
-        } catch (pkgErr) {
-            console.log('⚠️ 패키지 FFmpeg 로드 실패, 스크립트 태그 방식 시도...', pkgErr.message);
+            // 방법 1: 안정적인 CDN 버전 사용
+            console.log('📡 CDN에서 FFmpeg 로드 시도...');
+            FFmpegModule = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js');
+            console.log('✅ CDN FFmpeg 로드 성공');
+        } catch (cdnError) {
+            console.log('⚠️ CDN 로드 실패, 대체 CDN 시도...', cdnError.message);
             try {
-                FFmpegModule = await loadFFmpegViaScript();
-                console.log('✅ 스크립트 태그 FFmpeg 로드 성공');
-            } catch (scriptError) {
-                console.log('❌ FFmpeg 로드 실패:', scriptError.message);
-                throw new Error('FFmpeg 라이브러리를 로드할 수 없습니다.');
+                // 방법 2: 대체 CDN
+                FFmpegModule = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js');
+                console.log('✅ 대체 CDN FFmpeg 로드 성공');
+            } catch (altCdnError) {
+                console.log('⚠️ 대체 CDN도 실패, 스크립트 태그 방식 시도...', altCdnError.message);
+                try {
+                    // 방법 3: 스크립트 태그로 로드
+                    FFmpegModule = await loadFFmpegViaScript();
+                    console.log('✅ 스크립트 태그 FFmpeg 로드 성공');
+                } catch (scriptError) {
+                    console.log('❌ 모든 FFmpeg 로드 방식 실패:', scriptError.message);
+                    throw new Error('FFmpeg 라이브러리를 로드할 수 없습니다. 네트워크 연결을 확인해주세요.');
+                }
             }
         }
         
-        // FFmpeg.wasm 새 버전 API 처리 (0.11.x 이상)
-        let ffmpeg;
-        let fetchFile;
+        // FFmpeg 함수 추출 및 검증
+        let createFFmpeg, fetchFile;
         
-        // 새로운 FFmpeg.wasm API (0.11.x 이상) 확인
-        if (FFmpegModule?.FFmpeg) {
-            console.log('🆕 FFmpeg.wasm 새 API 감지 (0.11.x+)');
-            const { FFmpeg } = FFmpegModule;
-            ffmpeg = new FFmpeg();
-            fetchFile = FFmpegModule.fetchFile;
-            
-            updateTranscriptionProgress(45, '🎵 FFmpeg.wasm 초기화...', 'WebAssembly 엔진 시작');
-            
-            console.log('🔄 FFmpeg.wasm 로딩 시작...');
-            updateTranscriptionProgress(47, '🎵 FFmpeg.wasm 로딩 중...', 'WebAssembly 초기화');
-            
+        console.log('🔍 FFmpeg 모듈 구조 분석:', {
+            hasDefault: !!FFmpegModule.default,
+            hasCreateFFmpeg: !!FFmpegModule.createFFmpeg,
+            hasFFmpeg: !!FFmpegModule.FFmpeg,
+            moduleKeys: Object.keys(FFmpegModule),
+            windowFFmpeg: !!window.FFmpeg
+        });
+        
+        // 다양한 모듈 구조에 대응
+        if (FFmpegModule.default && FFmpegModule.default.createFFmpeg) {
+            // ES 모듈 default export
+            console.log('✅ ES 모듈 default export 감지');
+            ({ createFFmpeg, fetchFile } = FFmpegModule.default);
+        } else if (FFmpegModule.createFFmpeg) {
+            // 직접 export
+            console.log('✅ 직접 export 감지');
+            ({ createFFmpeg, fetchFile } = FFmpegModule);
+        } else if (window.FFmpeg && window.FFmpeg.createFFmpeg) {
+            // 글로벌 객체
+            console.log('✅ 글로벌 FFmpeg 객체 감지');
+            ({ createFFmpeg, fetchFile } = window.FFmpeg);
+        } else {
+            // 모든 가능성 체크
+            console.log('❌ FFmpeg 함수를 찾을 수 없습니다. 사용 가능한 속성들:', 
+                Object.keys(FFmpegModule), 
+                'window.FFmpeg:', !!window.FFmpeg
+            );
+            throw new Error('createFFmpeg 함수를 찾을 수 없습니다. 라이브러리 구조가 예상과 다릅니다.');
+        }
+        
+        // 함수 유효성 검증
+        if (typeof createFFmpeg !== 'function') {
+            console.log('❌ createFFmpeg 타입 오류:', typeof createFFmpeg);
+            throw new Error(`createFFmpeg이 함수가 아닙니다. 실제 타입: ${typeof createFFmpeg}`);
+        }
+        
+        console.log('✅ FFmpeg 함수 추출 성공');
+        
+        updateTranscriptionProgress(45, '🎵 FFmpeg.wasm 초기화...', 'WebAssembly 엔진 시작');
+        
+        // FFmpeg 인스턴스 생성
+        console.log('🔧 FFmpeg 인스턴스 생성 중...');
+        const ffmpeg = createFFmpeg({ 
+            log: false,
+            // 안정적인 CDN 코어 사용
+            corePath: 'https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js'
+        });
+        
+        console.log('🔄 FFmpeg.wasm 로딩 시작...');
+        updateTranscriptionProgress(47, '🎵 FFmpeg.wasm 로딩 중...', 'WebAssembly 초기화');
+        
+        // FFmpeg 로드
+        if (typeof ffmpeg.load === 'function') {
             try {
                 await ffmpeg.load();
-                console.log('✅ FFmpeg.wasm 로드 완료');
+                console.log('✅ FFmpeg.wasm 로딩 완료');
             } catch (loadError) {
                 console.log('❌ FFmpeg 로드 실패:', loadError.message);
                 throw new Error(`FFmpeg 로딩 실패: ${loadError.message}`);
-            }
-        }
-        // 기존 FFmpeg.wasm API (0.10.x 이하) 처리
-        else if (FFmpegModule?.createFFmpeg || window.FFmpeg?.createFFmpeg) {
-            console.log('📦 FFmpeg.wasm 기존 API 감지 (0.10.x)');
-            let createFFmpeg;
-            
-            if (FFmpegModule && typeof FFmpegModule.createFFmpeg === 'function') {
-                ({ createFFmpeg, fetchFile } = FFmpegModule);
-            } else if (FFmpegModule?.default && typeof FFmpegModule.default.createFFmpeg === 'function') {
-                ({ createFFmpeg, fetchFile } = FFmpegModule.default);
-            } else if (window.FFmpeg && typeof window.FFmpeg.createFFmpeg === 'function') {
-                ({ createFFmpeg, fetchFile } = window.FFmpeg);
-            }
-            
-            if (typeof createFFmpeg !== 'function') {
-                throw new Error('createFFmpeg이 함수가 아닙니다.');
-            }
-            
-            ffmpeg = createFFmpeg({ 
-                log: false,
-                corePath: '/ffmpeg/ffmpeg-core.js'
-            });
-            
-            updateTranscriptionProgress(45, '🎵 FFmpeg.wasm 초기화...', 'WebAssembly 엔진 시작');
-            console.log('🔄 FFmpeg.wasm 로딩 시작...');
-            updateTranscriptionProgress(47, '🎵 FFmpeg.wasm 로딩 중...', 'WebAssembly 초기화');
-            
-            // 기존 API에서는 load() 메서드 사용
-            if (typeof ffmpeg.load === 'function') {
-                try {
-                    await ffmpeg.load();
-                    console.log('✅ FFmpeg.wasm 로딩 완료');
-                } catch (loadError) {
-                    console.log('❌ FFmpeg 로드 실패:', loadError.message);
-                    throw new Error(`FFmpeg 로딩 실패: ${loadError.message}`);
-                }
             }
         } else {
             console.log('⚠️ FFmpeg.load() 메서드가 없습니다. 자동 초기화 가정.');
@@ -666,9 +694,11 @@ async function compressWithFFmpegWasm(audioData, sampleRate) {
     } catch (error) {
         console.error('❌ FFmpeg.wasm 실패:', error);
         console.log('📋 오류 상세:', error.message);
-        updateTranscriptionProgress(42, '❌ FFmpeg.wasm 실패', `${error.message}`);
-        // 절대 폴백 금지: 즉시 실패
-        throw error;
+        updateTranscriptionProgress(42, '⚠️ FFmpeg.wasm 실패', `${error.message} - MediaRecorder로 폴백`);
+        
+        // 폴백: MediaRecorder 사용
+        console.log('🔄 MediaRecorder 폴백 시작...');
+        return await compressWithMediaRecorder(audioData, sampleRate);
     }
 }
 
@@ -1002,7 +1032,7 @@ async function transcribeWithOpenAI(audioBlob, chunkStartTime = 0) {
     console.log('🔑 API 키 상태:', apiKey ? '존재함' : '없음');
     
     if (!apiKey) {
-        throw new Error('❌ OpenAI API 키가 필요합니다.\n\n🔧 해결방법:\n1. ⚙️ 설정 버튼 클릭\n2. OpenAI API 키 입력\n3. API 키 발급: https://platform.openai.com/api-keys');
+        throw new Error('OpenAI API 키가 필요합니다.\n\n⚙️ 설정: 화면 하단 ⚙️ 버튼 클릭');
     }
 
     try {
@@ -1016,7 +1046,7 @@ async function transcribeWithOpenAI(audioBlob, chunkStartTime = 0) {
         console.log(`🌐 OpenAI Whisper 언어 설정: ${language} (${languageCode})`);
         
         const formData = new FormData();
-        formData.append('file', audioBlob, 'audio.webm');
+        formData.append('file', audioBlob, 'audio.wav');
         formData.append('model', 'whisper-1');
         formData.append('language', language);
         formData.append('response_format', 'verbose_json');
@@ -1024,23 +1054,12 @@ async function transcribeWithOpenAI(audioBlob, chunkStartTime = 0) {
         
         // VAD (Voice Activity Detection) 추가 - 무음 구간 필터링
         formData.append('prompt', '한국어 음성입니다. 무음 구간은 무시하고 실제 음성만 인식해주세요.');
-        
-        console.log('📤 FormData 준비 완료:', {
-            fileName: 'audio.webm',
-            fileSize: audioBlob.size,
-            fileType: audioBlob.type,
-            model: 'whisper-1',
-            language: language,
-            responseFormat: 'verbose_json'
-        });
 
-        console.log('🚀 OpenAI API 호출 시작...');
         const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}` },
             body: formData,
         });
-        console.log('📡 OpenAI API 응답 수신:', response.status, response.statusText);
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
@@ -1091,12 +1110,7 @@ async function transcribeWithOpenAI(audioBlob, chunkStartTime = 0) {
         }
         
     } catch (error) {
-        console.error('❌ OpenAI 음성 인식 오류:', error);
-        console.error('🔍 오류 상세 정보:', {
-            message: error.message,
-            stack: error.stack,
-            name: error.name
-        });
+        console.error('OpenAI 음성 인식 오류:', error);
         throw error;
     }
 }
@@ -1436,8 +1450,6 @@ function addSubtitleEntryWithTimestamp(segments, source) {
     // 자막 생성 완료 이벤트 호출
     onSubtitleGenerated(segments.map(s => s.text).join('\n'));
 }
-// 외부에서 import할 수 있도록 내보내기 (project-manager 등)
-export { addSubtitleEntryWithTimestamp };
 
 function copySubtitles(segments) {
     const textToCopy = segments.map(seg => `[${formatTimestamp(seg.start)} - ${formatTimestamp(seg.end)}] ${seg.text.trim()}`).join('\n');
@@ -1880,12 +1892,3 @@ export function setupSimpleTranscriptionEventListeners() {
         }
     }, '🔄 리팩토링된 자막 추출 시스템 정리');
 } 
-
-// main.js의 lazyLoader 경로와 호환되는 초기화 함수 제공
-export function initializeTranscription() {
-    try {
-        setupSimpleTranscriptionEventListeners();
-    } catch (e) {
-        console.error('initializeTranscription 실패:', e);
-    }
-}

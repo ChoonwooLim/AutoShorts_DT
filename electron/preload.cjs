@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('secureKeys', {
 });
 
 contextBridge.exposeInMainWorld('sttProxy', {
-  openai: (bytes, language) => ipcRenderer.invoke('stt:openai', { bytes, language })
+  openai: (bytes, language, apiKey) => ipcRenderer.invoke('stt:openai', { bytes, language, apiKey })
 });
 
 

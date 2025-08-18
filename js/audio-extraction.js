@@ -610,13 +610,20 @@ async function transcribeWithOpenAI(audioBlob) {
 async function transcribeWithOpenAIViaProxy(audioBlob) {
     const apiKey = await getApiKey('gpt');
     if (!apiKey) {
-        throw new Error('OpenAI (GPT) API 키를 설정해주세요.\n\n⚙️ 해결방법:\n1. 화면 하단 ⚙️ 버튼 클릭\n2. OpenAI API 키 입력\n3. https://platform.openai.com/api-keys 에서 발급');
+        throw new Error('OpenAI API 키가 설정되지 않았습니다.');
+    }
+    
+    // sttProxy 확인
+    if (!window.sttProxy || typeof window.sttProxy.openai !== 'function') {
+        console.warn('⚠️ sttProxy를 사용할 수 없습니다. 직접 API 호출로 전환합니다.');
+        // sttProxy가 없는 경우 직접 API 호출
+        return await transcribeWithOpenAIDirect(audioBlob, apiKey);
     }
 
     try {
         updatePlaceholder('OpenAI Whisper(프록시)로 음성 인식 중...');
         const arrBuf = await audioBlob.arrayBuffer();
-        const res = await window.sttProxy.openai(arrBuf, document.getElementById('sourceLang').value);
+        const res = await window.sttProxy.openai(arrBuf, document.getElementById('sourceLang').value, apiKey);
         if (res && res.__error) throw new Error(res.__error);
         const text = (res && res.text) ? res.text.trim() : '';
         if (text) {
@@ -627,6 +634,44 @@ async function transcribeWithOpenAIViaProxy(audioBlob) {
         return '(인식된 텍스트 없음)';
     } catch (error) {
         console.error('OpenAI(프록시) 음성 인식 오류:', error);
+        throw error;
+    }
+}
+
+// OpenAI 직접 API 호출 (sttProxy가 없을 때 폴백)
+async function transcribeWithOpenAIDirect(audioBlob, apiKey) {
+    try {
+        updatePlaceholder('OpenAI Whisper로 음성 인식 중...');
+        
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'audio.webm');
+        formData.append('model', 'whisper-1');
+        formData.append('language', 'ko');
+        formData.append('response_format', 'verbose_json');
+        
+        const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+            body: formData,
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(`OpenAI API 오류 (${response.status}): ${errorData.error?.message || response.statusText}`);
+        }
+        
+        const data = await response.json();
+        const text = data.text?.trim() || '';
+        
+        if (text) {
+            console.log(`✅ OpenAI 음성 인식 성공: ${text.substring(0, 50)}...`);
+            return text;
+        }
+        
+        console.warn('⚠️ OpenAI에서 텍스트를 인식하지 못했습니다.');
+        return '(인식된 텍스트 없음)';
+    } catch (error) {
+        console.error('OpenAI 직접 API 오류:', error);
         throw error;
     }
 }
@@ -702,6 +747,8 @@ async function startTranscription() {
                 console.log(`✅ 조각 ${i + 1} 처리 완료 [${formatTimestamp(startTime)}]: ${text ? text.substring(0, 30) + '...' : '(무음)'}`);
             } catch (chunkError) {
                 console.warn(`⚠️ 조각 ${i + 1} 처리 실패:`, chunkError.message);
+                // ffmpeg-wasm에서의 실패 등 핵심 실패 시 즉시 중단
+                throw chunkError;
                 const startTime = i * segmentDuration;
                 results.push({ 
                     index: i, 

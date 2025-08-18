@@ -4,9 +4,55 @@
 import { state } from './state.js';
 import { getApiKey } from './api.js';
 
+// FFmpeg 관련 변수들 - 동적 로딩으로 처리
+let FFmpeg = null;
+let FFmpegUtil = null;
+
+// FFmpeg 동적 로딩 함수
+async function loadFFmpeg() {
+    if (!FFmpeg) {
+        try {
+            // 동일 출처에서 로드하여 워커/CSP 문제 회피
+            const ffmpegModule = await import('@ffmpeg/ffmpeg');
+            const utilModule = await import('@ffmpeg/util');
+            FFmpeg = ffmpegModule;
+            FFmpegUtil = utilModule;
+            console.log('✅ FFmpeg 모듈 동적 로딩 완료');
+        } catch (error) {
+            console.warn('⚠️ FFmpeg 로딩 실패, Web Audio API만 사용:', error);
+        }
+    }
+    return FFmpeg && FFmpegUtil;
+}
+
 // DOM 요소들 - 지연 로딩 환경에서 안전한 초기화
 let subtitleContainer, subtitlePlaceholder, startTranscriptionBtn, modelSelector, compressionMethodSelector;
 let transcriptionProgress, transcriptionProgressFill, transcriptionProgressText, transcriptionProgressDetails;
+
+// 외부에서 호출할 수 있는 초기화 함수
+export async function initializeTranscription() {
+    try {
+        console.log('🎙️ Transcription system initializing...');
+        
+        // DOM 요소 초기화
+        initializeDOMElements();
+        
+        // 이벤트 리스너 설정
+        setupTranscriptionEventListeners();
+
+        // 버튼 강제 활성화 (HTML 초기 상태가 disabled인 경우 대비)
+        const btn = document.getElementById('startTranscriptionBtn');
+        const container = document.getElementById('subtitleContainer');
+        if (btn) btn.disabled = false;
+        if (container) container.style.display = 'block';
+        
+        console.log('✅ Transcription system initialized successfully');
+        return true;
+    } catch (error) {
+        console.error('❌ Failed to initialize transcription system:', error);
+        return false;
+    }
+}
 
 // DOM 요소 초기화 함수 (강화된 버전)
 function initializeDOMElements() {
@@ -200,131 +246,59 @@ function determineCompressionLevel(fileSizeMB, durationMinutes, originalSampleRa
 
 // 🔄 리팩토링: AudioUtils 사용으로 중복 코드 제거
 async function extractAudioWithWebAPI(file) {
-    console.log(`🎵 Web Audio API로 스마트 오디오 추출: ${file.name}`);
-    updatePlaceholder('🎵 브라우저 Web Audio API로 스마트 압축 처리 중...');
-    
-    try {
-        // 1. 파일을 ArrayBuffer로 읽기
-        const arrayBuffer = await file.arrayBuffer();
-        const fileSizeMB = arrayBuffer.byteLength / (1024 * 1024);
-        console.log(`📊 파일 크기: ${fileSizeMB.toFixed(1)}MB`);
-        
-        // 2. 🔄 리팩토링: AudioUtils 사용 (안전한 로딩)
-        updatePlaceholder('🔄 오디오 데이터 디코딩 중...');
-        
-        // AudioUtils가 로드되지 않았다면 로드 (백업용 - main.js에서 이미 로드됨)
-        if (!window.audioUtils) {
-            console.log('🔄 AudioUtils 백업 로드 중... (main.js에서 미리 로드되지 않음)');
-            updateTranscriptionProgress(15, '🔄 오디오 유틸리티 로드 중...', 'AudioUtils 모듈 초기화');
-            
-            try {
-                // AudioUtils 동적 로드
-                const audioUtilsModule = await import('./utils/audio-utils.js');
-                window.audioUtils = audioUtilsModule.default || audioUtilsModule;
-                
-                // AudioUtils 로드 확인
-                if (!window.audioUtils || typeof window.audioUtils.decodeAudioData !== 'function') {
-                    throw new Error('AudioUtils 모듈이 올바르게 로드되지 않았습니다');
-                }
-                
-                console.log('✅ AudioUtils 백업 로드 완료 - 바로 계속 진행합니다');
-            } catch (loadError) {
-                console.error('❌ AudioUtils 로드 실패:', loadError);
-                throw new Error('오디오 처리 모듈을 로드할 수 없습니다. 브라우저를 새로고침해주세요.');
-            }
-        } else {
-            console.log('✅ AudioUtils 이미 로드됨 - 바로 처리 시작');
-        }
-        
-        // AudioUtils 메서드 존재 확인
-    if (!window.audioUtils || typeof window.audioUtils.decodeAudioData !== 'function') {
-        throw new Error('AudioUtils의 decodeAudioData 함수를 찾을 수 없습니다');
+    if (!file) {
+        throw new Error("영상 파일이 없습니다.");
     }
     
-    const audioBuffer = await window.audioUtils.decodeAudioData(arrayBuffer);
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const arrayBuffer = await file.arrayBuffer();
         
-        console.log(`✅ 오디오 디코딩 성공: ${audioBuffer.duration.toFixed(1)}초, ${audioBuffer.sampleRate}Hz`);
+        updateTranscriptionProgress(25, '🎧 오디오 디코딩 중...', '영상 파일에서 음성 데이터 분석');
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+        updateTranscriptionProgress(30, '🎵 오디오 데이터 추출 중...', '고품질 모노 채널로 변환');
+        const channelData = audioBuffer.getChannelData(0); // 모노 채널
         
-        // 4. 모노 채널로 변환 (필요시)
-        const channelData = audioBuffer.getChannelData(0); // 첫 번째 채널 사용
+        const targetSampleRate = Math.min(audioBuffer.sampleRate, 16000);
+        console.log(`🎚️ 오디오 리샘플링: ${audioBuffer.sampleRate}Hz → ${targetSampleRate}Hz`);
         
-        // 5. 🔄 리팩토링: AudioUtils 압축 수준 결정 사용
-        const durationMinutes = audioBuffer.duration / 60;
-        
-        console.log(`📊 원본 분석: ${fileSizeMB.toFixed(2)}MB, ${durationMinutes.toFixed(1)}분, ${audioBuffer.sampleRate}Hz`);
-        
-        // 🔄 리팩토링: AudioUtils 압축 수준 결정 사용
-        let compression;
-        if (window.audioUtils && typeof window.audioUtils.determineCompressionLevel === 'function') {
-            compression = window.audioUtils.determineCompressionLevel(fileSizeMB, durationMinutes, audioBuffer.sampleRate);
-        } else {
-            console.warn('⚠️ AudioUtils.determineCompressionLevel를 찾을 수 없어 기본값 사용');
-            compression = { targetSampleRate: 16000, compressionLevel: '표준 압축', quality: '균형 최적화' };
-        }
-        const { targetSampleRate, compressionLevel, quality } = compression;
-        
-        console.log(`🎛️ Google STT 최적화 압축 분석:`);
-        console.log(`   📊 원본: ${audioBuffer.sampleRate}Hz → ${targetSampleRate}Hz`);
-        console.log(`   🎚️ 수준: ${compressionLevel} (${quality})`);
-        console.log(`   💾 예상 압축률: ${((audioBuffer.sampleRate / targetSampleRate) * 100).toFixed(0)}%`);
-        console.log(`   🎯 Google STT 호환성: ${targetSampleRate <= 8000 ? '최적화됨' : '일반'}`);
-        
-        updatePlaceholder(`🎛️ ${compressionLevel} 적용 중... (${quality})`);
-        
-            // 6. 🔄 리팩토링: AudioUtils 리샘플링 사용
-    let resampledData;
-    if (window.audioUtils && typeof window.audioUtils.resampleAudio === 'function') {
-        resampledData = window.audioUtils.resampleAudio(channelData, audioBuffer.sampleRate, targetSampleRate);
-    } else {
-        console.warn('⚠️ AudioUtils.resampleAudio를 찾을 수 없어 원본 데이터 사용');
-        resampledData = channelData;
-    } // 폴백: 원본 데이터 사용
-        
-        // 7. 선택된 방식으로 압축 변환
-        const selectedCompressionMethod = getSelectedCompressionMethod();
-        console.log(`🎵 ${selectedCompressionMethod} 압축 변환 시작...`);
-        updateTranscriptionProgress(40, `🎵 ${selectedCompressionMethod} 압축 변환 중...`, '90% 크기 감소 예상 - 잠시만 기다려주세요');
-        updatePlaceholder(`🎵 ${selectedCompressionMethod} 압축 변환 중... (90% 크기 감소 예상)`);
-        
-        const compressedBlob = await convertToCompressedAudio(resampledData, targetSampleRate, selectedCompressionMethod);
-        
-        // 🔄 리팩토링: AudioUtils 압축 분석 사용
-        const originalSizeMB = (resampledData.length * 2) / (1024 * 1024); // Float32Array 크기
+        const resampledData = resampleAudio(channelData, audioBuffer.sampleRate, targetSampleRate);
+
+        // FFmpeg.wasm 방식만 사용
+        const method = 'ffmpeg-wasm';
+        console.log(`🎵 선택된 압축 방식 적용: ${method}`);
+        updateTranscriptionProgress(40, '🎵 오디오 압축 중...', `${method} 방식으로 전체 오디오 압축`);
+
+        let compressedBlob;
+        // FFmpeg.wasm 방식만 사용
+        compressedBlob = await compressWithFFmpegWasm(resampledData, targetSampleRate);
         const compressedSizeMB = compressedBlob.size / (1024 * 1024);
-        let compressionRatio;
-        if (window.audioUtils && typeof window.audioUtils.calculateCompressionRatio === 'function') {
-            compressionRatio = window.audioUtils.calculateCompressionRatio(originalSizeMB * 1024 * 1024, compressedBlob.size);
-        } else {
-            compressionRatio = `${(((originalSizeMB * 1024 * 1024 - compressedBlob.size) / (originalSizeMB * 1024 * 1024)) * 100).toFixed(1)}%`;
+        
+        console.log(`✅ 전체 MP3 압축 완료: ${compressedSizeMB.toFixed(2)}MB`);
+        updateTranscriptionProgress(60, '🗜️ 압축 완료', `전체 크기: ${compressedSizeMB.toFixed(2)}MB`);
+
+        // OpenAI Whisper의 경우 25MB 미만이면 분할하지 않음
+        const openaiLimit = 24 * 1024 * 1024; // 24MB로 안전 마진 설정
+        if (compressedBlob.size < openaiLimit) {
+            console.log('✅ 파일 크기가 작아 분할이 필요 없습니다. 전체 파일을 사용합니다.');
+            updateTranscriptionProgress(65, '✅ 분할 불필요', '정확도 최상으로 처리');
+            return [{
+                blob: compressedBlob,
+                startTime: 0,
+                duration: audioBuffer.duration
+            }];
         }
-        
-        console.log(`🎵 ${selectedCompressionMethod} 압축 완료: ${originalSizeMB.toFixed(2)}MB → ${compressedSizeMB.toFixed(2)}MB (${compressionRatio}% 감소)`);
-        updateTranscriptionProgress(60, `✅ ${selectedCompressionMethod} 압축 완료`, `${originalSizeMB.toFixed(2)}MB → ${compressedSizeMB.toFixed(2)}MB (${compressionRatio}% 감소)`);
-        updatePlaceholder(`✅ ${selectedCompressionMethod} 압축 완료: ${compressedSizeMB.toFixed(2)}MB (${compressionRatio}% 감소)`);
-        
-        // 8. 압축된 파일 기반 스마트 분할 수행
-        console.log(`📊 ${selectedCompressionMethod} Google STT 호환성: ${compressedSizeMB <= 9.5 ? '✅ 분할 불필요' : '⚠️ 분할 필요'}`);
-        
-        const chunks = await splitAudioBlob(compressedBlob, audioBuffer.duration);
-        
-        console.log(`✅ ${selectedCompressionMethod} 기반 스마트 분할 완료:`);
-        console.log(`   📦 조각 수: ${chunks.length}개`);
-        console.log(`   🎵 품질: ${targetSampleRate}Hz ${selectedCompressionMethod} (${compressionLevel})`);
-        console.log(`   📊 Google STT 호환성: ${compressedSizeMB <= 9.5 ? '✅ 완벽 호환' : '⚠️ 추가 분할 필요'}`);
-        console.log(`   🎯 ${selectedCompressionMethod} 압축: ${compressionRatio}% 크기 감소로 최적화`);
-        
-        updatePlaceholder(`✅ ${selectedCompressionMethod} 압축 분할 완료: ${chunks.length}개 조각 (${compressionRatio}% 감소)`);
-        
-        return chunks;
+
+        // 압축 후에도 크기가 크면 스마트 분할 수행
+        console.log(`⚠️ 압축 후에도 파일이 큽니다 (${compressedSizeMB.toFixed(2)}MB). 스마트 분할을 시작합니다.`);
+        updateTranscriptionProgress(65, '⚠️ 파일 분할 중...', '크기가 커서 최소한으로 분할합니다.');
+        return await splitAudioBlob(compressedBlob, audioBuffer.duration);
         
     } catch (error) {
-        console.error('❌ Web Audio API 처리 실패:', error);
-        
-        if (error.name === 'EncodingError' || error.message.includes('decode')) {
-            throw new Error(`지원되지 않는 오디오 형식입니다.\n\n💡 해결방법:\n1. MP4, WebM, OGG 형식 사용\n2. 다른 영상 파일 시도\n3. 영상에 오디오 트랙이 있는지 확인`);
-        } else {
-            throw new Error(`오디오 처리 실패: ${error.message}\n\n🔧 해결방법:\n1. 브라우저 새로고침\n2. 파일 크기 확인 (100MB 이하 권장)\n3. 다른 브라우저 시도`);
-        }
+        console.error('오디오 추출 및 압축 중 오류 발생:', error);
+        updateTranscriptionProgress(100, '❌ 오디오 처리 실패', error.message);
+        throw new Error(`오디오 처리 중 오류: ${error.message}`);
     }
 }
 
@@ -471,17 +445,34 @@ async function convertToCompressedAudio(audioData, sampleRate, method) {
     } catch (error) {
         console.error(`❌ ${method} 압축 실패:`, error);
         console.log(`📋 ${method} 오류 상세:`, error.message);
+        console.log('🔄 기본 MediaRecorder로 폴백...');
         
-        // FFmpeg.wasm 실패 시 자동 폴백 금지 - 바로 종료
-        if (method === 'ffmpeg-wasm') {
-            updateTranscriptionProgress(0, '❌ FFmpeg.wasm 실패', error.message);
-            throw new Error(`FFmpeg.wasm 실패: ${error.message}`);
+        // 실패 시 기본 방식으로 폴백
+        try {
+            updateTranscriptionProgress(42, '🔄 폴백 처리 중...', 'MediaRecorder로 안전하게 처리');
+            return await compressWithMediaRecorder(audioData, sampleRate);
+        } catch (fallbackError) {
+            // 통합 에러 처리 시스템 사용
+            if (window.errorHandler) {
+                window.errorHandler.handleError({
+                    type: 'audio',
+                    message: fallbackError.message,
+                    originalError: fallbackError,
+                    context: { 
+                        function: 'convertToCompressedAudio',
+                        compressionMethod: method,
+                        audioDataLength: audioData.length
+                    },
+                    severity: 'medium'
+                });
+            }
+            
+            console.error('❌ 폴백도 실패:', fallbackError);
+            // 최후의 수단: WAV 형식 그대로 반환
+            console.log('🔄 WAV 형식으로 최종 폴백...');
+            updateTranscriptionProgress(50, '⚠️ WAV 형식 사용', '압축 없이 원본 형식 유지');
+            return createWavBlob(audioData, sampleRate);
         }
-        
-        // 다른 방식(web-workers, mediarecorder)에서만 폴백 허용
-        console.log('🔄 MediaRecorder로 폴백 시도...');
-        updateTranscriptionProgress(42, '🔄 폴백 처리 중...', 'MediaRecorder로 안전하게 처리');
-        return await compressWithMediaRecorder(audioData, sampleRate);
     }
 }
 
@@ -539,135 +530,86 @@ async function loadFFmpegViaScript() {
 }
 
 // 방법 2: FFmpeg.wasm (고성능 - 전문가용)
+// 환경별 FFmpeg 코어 기본 경로
+function getFfmpegCoreBase() {
+    try {
+        const hostname = window.location.hostname;
+        const port = window.location.port;
+        if (hostname === 'localhost' && port === '3000') {
+            return `${window.location.origin}/AutoShortsWeb/ffmpeg/`;
+        } else if (hostname === 'localhost' && port === '5173') {
+            return `${window.location.origin}/ffmpeg/`;
+        } else if (hostname === 'twinverse.org' || hostname === 'www.twinverse.org') {
+            return `${window.location.origin}/AutoShortsWeb/ffmpeg/`;
+        }
+        return `${window.location.origin}/ffmpeg/`;
+    } catch (e) {
+        return '/ffmpeg/';
+    }
+}
+
 async function compressWithFFmpegWasm(audioData, sampleRate) {
     console.log('🎵 FFmpeg.wasm 압축 방식 시작...');
     updateTranscriptionProgress(42, '🎵 FFmpeg.wasm 압축 중...', '고성능 네이티브 인코더 - 빠른 처리');
-    
+
     try {
-        // FFmpeg.wasm 동적 로드 (호환성 개선)
-        console.log('🔄 FFmpeg.wasm 라이브러리 로드 시도...');
-        updateTranscriptionProgress(43, '🎵 FFmpeg.wasm 로딩...', 'CDN에서 라이브러리 다운로드 중');
-        
-        // 안전한 CDN 우선 방식으로 변경
-        let FFmpegModule;
-        console.log('🔧 FFmpeg.wasm 라이브러리 로드 시작...');
-        
-        // Electron/Vite 환경: 로컬 번들/정적 경로 우선 (CSP, COEP/COOP 충돌 방지)
-        try {
-            // 정식 패키지 ESM 로드
-            FFmpegModule = await import('@ffmpeg/ffmpeg');
-            console.log('✅ 패키지 FFmpeg 로드 성공');
-        } catch (pkgErr) {
-            console.log('⚠️ 패키지 FFmpeg 로드 실패, 스크립트 태그 방식 시도...', pkgErr.message);
-            try {
-                FFmpegModule = await loadFFmpegViaScript();
-                console.log('✅ 스크립트 태그 FFmpeg 로드 성공');
-            } catch (scriptError) {
-                console.log('❌ FFmpeg 로드 실패:', scriptError.message);
-                throw new Error('FFmpeg 라이브러리를 로드할 수 없습니다.');
-            }
+        // FFmpeg 동적 로딩
+        const ffmpegLoaded = await loadFFmpeg();
+        if (!ffmpegLoaded) {
+            throw new Error('FFmpeg 모듈을 로드할 수 없습니다');
         }
-        
-        // FFmpeg.wasm 새 버전 API 처리 (0.11.x 이상)
-        let ffmpeg;
-        let fetchFile;
-        
-        // 새로운 FFmpeg.wasm API (0.11.x 이상) 확인
-        if (FFmpegModule?.FFmpeg) {
-            console.log('🆕 FFmpeg.wasm 새 API 감지 (0.11.x+)');
-            const { FFmpeg } = FFmpegModule;
-            ffmpeg = new FFmpeg();
-            fetchFile = FFmpegModule.fetchFile;
-            
-            updateTranscriptionProgress(45, '🎵 FFmpeg.wasm 초기화...', 'WebAssembly 엔진 시작');
-            
-            console.log('🔄 FFmpeg.wasm 로딩 시작...');
+
+        updateTranscriptionProgress(45, '🎵 FFmpeg.wasm 초기화...', 'WebAssembly 엔진 시작');
+
+        const coreBase = getFfmpegCoreBase();
+        const CreateFn = (FFmpeg && (FFmpeg.createFFmpeg || (FFmpeg.default && FFmpeg.default.createFFmpeg)));
+        const FFmpegClass = (FFmpeg && (FFmpeg.FFmpeg || (FFmpeg.default && FFmpeg.default.FFmpeg)));
+
+        let outputBlob;
+        if (typeof CreateFn === 'function') {
+            // createFFmpeg API
+            const ffmpeg = CreateFn({ log: true, corePath: `${coreBase}ffmpeg-core.js`, workerPath: `${coreBase}worker.js` });
+            console.log('🔄 FFmpeg.wasm 로딩 시작(createFFmpeg)...');
             updateTranscriptionProgress(47, '🎵 FFmpeg.wasm 로딩 중...', 'WebAssembly 초기화');
-            
-            try {
-                await ffmpeg.load();
-                console.log('✅ FFmpeg.wasm 로드 완료');
-            } catch (loadError) {
-                console.log('❌ FFmpeg 로드 실패:', loadError.message);
-                throw new Error(`FFmpeg 로딩 실패: ${loadError.message}`);
-            }
-        }
-        // 기존 FFmpeg.wasm API (0.10.x 이하) 처리
-        else if (FFmpegModule?.createFFmpeg || window.FFmpeg?.createFFmpeg) {
-            console.log('📦 FFmpeg.wasm 기존 API 감지 (0.10.x)');
-            let createFFmpeg;
-            
-            if (FFmpegModule && typeof FFmpegModule.createFFmpeg === 'function') {
-                ({ createFFmpeg, fetchFile } = FFmpegModule);
-            } else if (FFmpegModule?.default && typeof FFmpegModule.default.createFFmpeg === 'function') {
-                ({ createFFmpeg, fetchFile } = FFmpegModule.default);
-            } else if (window.FFmpeg && typeof window.FFmpeg.createFFmpeg === 'function') {
-                ({ createFFmpeg, fetchFile } = window.FFmpeg);
-            }
-            
-            if (typeof createFFmpeg !== 'function') {
-                throw new Error('createFFmpeg이 함수가 아닙니다.');
-            }
-            
-            ffmpeg = createFFmpeg({ 
-                log: false,
-                corePath: '/ffmpeg/ffmpeg-core.js'
+            await ffmpeg.load();
+            console.log('✅ FFmpeg.wasm 로딩 완료');
+
+            updateTranscriptionProgress(48, '🎵 FFmpeg.wasm 인코딩 중...', 'WAV → MP3 변환 (용량 축소)');
+            const wavBlob = createWavBlob(audioData, sampleRate);
+            ffmpeg.FS('writeFile', 'input.wav', await FFmpegUtil.fetchFile(wavBlob));
+            // MP3로 변환하여 용량 축소 (64kbps)
+            await ffmpeg.run('-i','input.wav','-vn','-ac','1','-ar', sampleRate.toString(),'-acodec','libmp3lame','-b:a','64k','output.mp3');
+            const outData = ffmpeg.FS('readFile','output.mp3');
+            outputBlob = new Blob([outData.buffer], { type: 'audio/mp3' });
+            ffmpeg.FS('unlink','input.wav');
+            ffmpeg.FS('unlink','output.mp3');
+        } else if (typeof FFmpegClass === 'function') {
+            // new FFmpeg() API
+            const ffmpeg = new FFmpegClass();
+            ffmpeg.on('log', ({ message }) => { /* optional log */ });
+            await ffmpeg.load({
+                coreURL: `${coreBase}ffmpeg-core.js`,
+                wasmURL: `${coreBase}ffmpeg-core.wasm`,
+                workerURL: `${coreBase}ffmpeg-core.worker.js`
             });
-            
-            updateTranscriptionProgress(45, '🎵 FFmpeg.wasm 초기화...', 'WebAssembly 엔진 시작');
-            console.log('🔄 FFmpeg.wasm 로딩 시작...');
-            updateTranscriptionProgress(47, '🎵 FFmpeg.wasm 로딩 중...', 'WebAssembly 초기화');
-            
-            // 기존 API에서는 load() 메서드 사용
-            if (typeof ffmpeg.load === 'function') {
-                try {
-                    await ffmpeg.load();
-                    console.log('✅ FFmpeg.wasm 로딩 완료');
-                } catch (loadError) {
-                    console.log('❌ FFmpeg 로드 실패:', loadError.message);
-                    throw new Error(`FFmpeg 로딩 실패: ${loadError.message}`);
-                }
-            }
+            const wavBlob = createWavBlob(audioData, sampleRate);
+            await ffmpeg.writeFile('input.wav', await FFmpegUtil.fetchFile(wavBlob));
+            // MP3로 변환하여 용량 축소 (64kbps)
+            await ffmpeg.exec(['-i','input.wav','-vn','-ac','1','-ar', sampleRate.toString(),'-acodec','libmp3lame','-b:a','64k','output.mp3']);
+            const out = await ffmpeg.readFile('output.mp3');
+            outputBlob = new Blob([out.buffer], { type: 'audio/mp3' });
         } else {
-            console.log('⚠️ FFmpeg.load() 메서드가 없습니다. 자동 초기화 가정.');
+            throw new Error('FFmpeg API에 접근할 수 없습니다 (createFFmpeg/FFmpeg 둘 다 없음)');
         }
-        
-        updateTranscriptionProgress(48, '🎵 FFmpeg.wasm 인코딩 중...', 'WAV → MP3 고품질 변환');
-        
-        // WAV 파일 생성
-        const wavBlob = createWavBlob(audioData, sampleRate);
-        const wavBuffer = await wavBlob.arrayBuffer();
-        
-        // FFmpeg에 파일 쓰기
-        ffmpeg.FS('writeFile', 'input.wav', new Uint8Array(wavBuffer));
-        
-        // MP3로 변환 (고품질 설정)
-        await ffmpeg.run(
-            '-i', 'input.wav',
-            '-acodec', 'libmp3lame',
-            '-b:a', '128k',
-            '-ar', sampleRate.toString(),
-            'output.mp3'
-        );
-        
-        // 결과 파일 읽기
-        const mp3Data = ffmpeg.FS('readFile', 'output.mp3');
-        const mp3Blob = new Blob([mp3Data.buffer], { type: 'audio/mp3' });
-        
-        // 임시 파일 정리
-        ffmpeg.FS('unlink', 'input.wav');
-        ffmpeg.FS('unlink', 'output.mp3');
-        
-        updateTranscriptionProgress(52, '🎵 FFmpeg.wasm 완료', '고품질 MP3 압축 성공');
+
+        updateTranscriptionProgress(52, '🎵 FFmpeg.wasm 완료', 'MP3 압축 성공 (용량 축소)');
         console.log('✅ FFmpeg.wasm 압축 성공');
-        
-        return mp3Blob;
-        
+        return outputBlob;
+
     } catch (error) {
         console.error('❌ FFmpeg.wasm 실패:', error);
-        console.log('📋 오류 상세:', error.message);
-        updateTranscriptionProgress(42, '❌ FFmpeg.wasm 실패', `${error.message}`);
-        // 절대 폴백 금지: 즉시 실패
+        updateTranscriptionProgress(100, '❌ FFmpeg.wasm 실패', error.message);
+        // 폴백하지 않고 예외를 던져 사용자가 방식 변경하도록 유도
         throw error;
     }
 }
@@ -876,31 +818,31 @@ async function encodeToMp3UsingMediaRecorder(audioBuffer, audioContext) {
 async function splitAudioBlob(audioBlob, duration) {
     const sizeMB = audioBlob.size / (1024 * 1024);
     
-    // Google STT: 9.5MB 안전 제한, OpenAI: 20MB
-    const googleSafeLimit = 9.5 * 1024 * 1024; // 9.5MB (최적 크기)
-    const openaiLimit = 20 * 1024 * 1024; // 20MB
+    // 더 작은 크기로 안전하게 분할 (OpenAI API 제한 고려)
+    const safeSizeLimit = 10 * 1024 * 1024; // 10MB로 안전하게 설정
+    const openaiLimit = 20 * 1024 * 1024; // 20MB (실제로는 25MB지만 안전 마진)
     
     console.log(`📊 스마트 분할 분석: ${sizeMB.toFixed(2)}MB, ${duration.toFixed(1)}초`);
     
     // 분할이 필요한지 확인
-    if (audioBlob.size <= googleSafeLimit) {
-        console.log(`✅ 분할 불필요: Google STT 최적 크기 (${sizeMB.toFixed(2)}MB ≤ 9.5MB)`);
+    if (audioBlob.size <= safeSizeLimit) {
+        console.log(`✅ 분할 불필요: 안전 크기 (${sizeMB.toFixed(2)}MB ≤ 10MB)`);
         return [{ blob: audioBlob, index: 0, totalChunks: 1 }];
     }
     
-    // 수학적 분할 계산: 오디오 최대크기 / X = < 9.5MB
-    // 따라서 X = Math.ceil(오디오 최대크기 / 9.5MB)
-    const optimalChunks = Math.ceil(audioBlob.size / googleSafeLimit);
+    // 수학적 분할 계산: 오디오 최대크기 / X = < 10MB
+    // 따라서 X = Math.ceil(오디오 최대크기 / 10MB)
+    const optimalChunks = Math.ceil(audioBlob.size / safeSizeLimit);
     const chunkSizeMB = sizeMB / optimalChunks;
     const chunkDuration = duration / optimalChunks;
     
     console.log(`🧮 수학적 분할 계산:`);
-    console.log(`   📊 X = Math.ceil(${sizeMB.toFixed(2)}MB / 9.5MB) = ${optimalChunks}개`);
+    console.log(`   📊 X = Math.ceil(${sizeMB.toFixed(2)}MB / 10MB) = ${optimalChunks}개`);
     console.log(`   📏 각 조각: ${chunkSizeMB.toFixed(2)}MB, ${chunkDuration.toFixed(1)}초`);
-    console.log(`   ✅ Google STT 호환: ${chunkSizeMB <= 9.5 ? '완벽' : '재계산 필요'}`);
+    console.log(`   ✅ API 호환: ${chunkSizeMB <= 10 ? '완벽' : '재계산 필요'}`);
     
     // 안전성 재확인 (혹시 계산 오차가 있을 경우)
-    if (chunkSizeMB > 9.5) {
+    if (chunkSizeMB > 10) {
         const safeChunks = optimalChunks + 1;
         const safeSizeMB = sizeMB / safeChunks;
         console.log(`⚠️ 안전 마진 추가: ${optimalChunks}개 → ${safeChunks}개 (각 ${safeSizeMB.toFixed(2)}MB)`);
@@ -1002,7 +944,7 @@ async function transcribeWithOpenAI(audioBlob, chunkStartTime = 0) {
     console.log('🔑 API 키 상태:', apiKey ? '존재함' : '없음');
     
     if (!apiKey) {
-        throw new Error('❌ OpenAI API 키가 필요합니다.\n\n🔧 해결방법:\n1. ⚙️ 설정 버튼 클릭\n2. OpenAI API 키 입력\n3. API 키 발급: https://platform.openai.com/api-keys');
+        throw new Error('OpenAI API 키가 필요합니다.\n\n⚙️ 설정: 화면 하단 ⚙️ 버튼 클릭');
     }
 
     try {
@@ -1016,7 +958,7 @@ async function transcribeWithOpenAI(audioBlob, chunkStartTime = 0) {
         console.log(`🌐 OpenAI Whisper 언어 설정: ${language} (${languageCode})`);
         
         const formData = new FormData();
-        formData.append('file', audioBlob, 'audio.webm');
+        formData.append('file', audioBlob, 'audio.mp3');
         formData.append('model', 'whisper-1');
         formData.append('language', language);
         formData.append('response_format', 'verbose_json');
@@ -1024,23 +966,12 @@ async function transcribeWithOpenAI(audioBlob, chunkStartTime = 0) {
         
         // VAD (Voice Activity Detection) 추가 - 무음 구간 필터링
         formData.append('prompt', '한국어 음성입니다. 무음 구간은 무시하고 실제 음성만 인식해주세요.');
-        
-        console.log('📤 FormData 준비 완료:', {
-            fileName: 'audio.webm',
-            fileSize: audioBlob.size,
-            fileType: audioBlob.type,
-            model: 'whisper-1',
-            language: language,
-            responseFormat: 'verbose_json'
-        });
 
-        console.log('🚀 OpenAI API 호출 시작...');
         const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}` },
             body: formData,
         });
-        console.log('📡 OpenAI API 응답 수신:', response.status, response.statusText);
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
@@ -1091,12 +1022,7 @@ async function transcribeWithOpenAI(audioBlob, chunkStartTime = 0) {
         }
         
     } catch (error) {
-        console.error('❌ OpenAI 음성 인식 오류:', error);
-        console.error('🔍 오류 상세 정보:', {
-            message: error.message,
-            stack: error.stack,
-            name: error.name
-        });
+        console.error('OpenAI 음성 인식 오류:', error);
         throw error;
     }
 }
@@ -1345,19 +1271,54 @@ function formatTimestamp(seconds) {
 }
 
 /**
+ * [신규] 불필요한 자막 세그먼트를 필터링하는 함수
+ * @param {Array} segments - 원본 자막 세그먼트 배열
+ * @returns {Array} - 필터링된 자막 세그먼트 배열
+ */
+function filterUnwantedSubtitles(segments) {
+    const unwantedTexts = [
+        "무시하고 실제 음성만 인식해주세요",
+        "실제 음성만 인식해주세요",
+        "자막 감사합니다", // Whisper에서 자주 나타나는 종료어 필터링
+        "시청해주셔서 감사합니다"
+    ];
+
+    return segments.filter(segment => {
+        const text = segment.text.trim();
+        if (!text) return false; // 비어 있는 텍스트 제외
+
+        for (const unwanted of unwantedTexts) {
+            if (text.includes(unwanted)) {
+                console.log(`🚫 필터링된 자막: "${text}" (사유: "${unwanted}" 포함)`);
+                return false;
+            }
+        }
+        return true;
+    });
+}
+
+/**
  * 타임스탬프가 있는 자막 세그먼트를 UI에 추가하고 전역 상태에 저장합니다.
  * @param {Array<object>} segments - 자막 세그먼트 배열. 각 객체는 start, end, text 속성을 가집니다.
  * @param {string} source - 자막 출처 (예: 'OpenAI Whisper')
  */
-function addSubtitleEntryWithTimestamp(segments, source) {
+export function addSubtitleEntryWithTimestamp(segments, source) {
     if (!segments || segments.length === 0) {
-        console.warn('⚠️ 타임스탬프 자막 세그먼트가 비어있습니다.');
+        console.warn('⚠️ 타임스탬프와 함께 추가할 세그먼트가 없습니다.');
         return;
     }
 
+    // [수정] 필터링 함수 호출
+    const filteredSegments = filterUnwantedSubtitles(segments);
+
+    if (filteredSegments.length === 0) {
+        console.log('✅ 모든 자막이 필터링되어 추가할 내용이 없습니다.');
+        return;
+    }
+    
     // 1. 전역 상태(state)에 자막 데이터 저장
     //    구조: [{ start: 0.0, end: 3.5, text: "안녕하세요" }, ...]
-    state.subtitles = segments.map(seg => ({
+    state.subtitles = filteredSegments.map(seg => ({
         start: parseFloat(seg.start),
         end: parseFloat(seg.end),
         text: seg.text.trim()
@@ -1384,8 +1345,8 @@ function addSubtitleEntryWithTimestamp(segments, source) {
     const resultEntry = document.createElement('div');
     resultEntry.className = 'subtitle-result-entry timestamped'; // 타임스탬프 스타일 추가
 
-    const totalSentences = segments.reduce((acc, seg) => acc + countSentences(seg.text), 0);
-    const totalLength = segments.reduce((acc, seg) => acc + seg.text.length, 0);
+    const totalSentences = filteredSegments.reduce((acc, seg) => acc + countSentences(seg.text), 0);
+    const totalLength = filteredSegments.reduce((acc, seg) => acc + seg.text.length, 0);
     
     let contentHTML = `
         <div class="subtitle-source">
@@ -1399,7 +1360,7 @@ function addSubtitleEntryWithTimestamp(segments, source) {
         <div class="subtitle-text">
     `;
 
-    segments.forEach(segment => {
+    filteredSegments.forEach(segment => {
         const start = formatTimestamp(segment.start);
         const end = formatTimestamp(segment.end);
         contentHTML += `
@@ -1414,7 +1375,7 @@ function addSubtitleEntryWithTimestamp(segments, source) {
         </div>
         <div class="subtitle-meta">
             <span>추출 시간: ${new Date().toLocaleString()}</span>
-            <span>길이: ${totalLength}자 • ${segments.length}개 세그먼트 • ${totalSentences}개 문장</span>
+            <span>길이: ${totalLength}자 • ${filteredSegments.length}개 세그먼트 • ${totalSentences}개 문장</span>
         </div>
     `;
 
@@ -1429,15 +1390,13 @@ function addSubtitleEntryWithTimestamp(segments, source) {
     console.log(`✅ 타임스탬프 자막 UI 업데이트 완료`);
 
     // 이벤트 리스너 추가 (이벤트 위임 사용)
-    resultEntry.querySelector('.copy-btn').addEventListener('click', () => copySubtitles(segments));
-    resultEntry.querySelector('.save-btn').addEventListener('click', () => saveSubtitlesAsSrt(segments, source));
+    resultEntry.querySelector('.copy-btn').addEventListener('click', () => copySubtitles(filteredSegments));
+    resultEntry.querySelector('.save-btn').addEventListener('click', () => saveSubtitlesAsSrt(filteredSegments, source));
     resultEntry.querySelector('.delete-btn').addEventListener('click', () => resultEntry.remove());
 
     // 자막 생성 완료 이벤트 호출
-    onSubtitleGenerated(segments.map(s => s.text).join('\n'));
+    onSubtitleGenerated(filteredSegments.map(s => s.text).join('\n'));
 }
-// 외부에서 import할 수 있도록 내보내기 (project-manager 등)
-export { addSubtitleEntryWithTimestamp };
 
 function copySubtitles(segments) {
     const textToCopy = segments.map(seg => `[${formatTimestamp(seg.start)} - ${formatTimestamp(seg.end)}] ${seg.text.trim()}`).join('\n');
@@ -1839,7 +1798,7 @@ export function setupSimpleTranscriptionEventListeners() {
         }
     }
     
-    // �� 더미 자막 생성 버튼 이벤트 리스너
+    // 🧪 더미 자막 생성 버튼 이벤트 리스너
     const generateDummyBtn = document.getElementById('generateDummySubtitleBtn');
     if (generateDummyBtn) {
         eventManager.addEventListener(generateDummyBtn, 'click', function() {
@@ -1879,13 +1838,32 @@ export function setupSimpleTranscriptionEventListeners() {
             window.currentFFmpegWorker = null;
         }
     }, '🔄 리팩토링된 자막 추출 시스템 정리');
-} 
-
-// main.js의 lazyLoader 경로와 호환되는 초기화 함수 제공
-export function initializeTranscription() {
-    try {
-        setupSimpleTranscriptionEventListeners();
-    } catch (e) {
-        console.error('initializeTranscription 실패:', e);
-    }
 }
+
+// 자막추출 이벤트 리스너 설정
+function setupTranscriptionEventListeners() {
+    console.log('🎙️ Setting up transcription event listeners...');
+    
+    if (startTranscriptionBtn) {
+        startTranscriptionBtn.addEventListener('click', async () => {
+            console.log('🎙️ Start transcription button clicked');
+            
+            // 영상 파일 확인
+            if (!state.uploadedFile) {
+                alert('자막 추출을 시작하기 전에 먼저 영상을 업로드해주세요.');
+                return;
+            }
+            
+            try {
+                // 간단한 자막 추출 시작
+                await startSimpleTranscription();
+            } catch (error) {
+                console.error('❌ Transcription failed:', error);
+                alert('자막 추출 중 오류가 발생했습니다: ' + error.message);
+            }
+        });
+        console.log('✅ Transcription button event listener added');
+    } else {
+        console.warn('⚠️ Start transcription button not found');
+    }
+} 

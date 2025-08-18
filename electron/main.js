@@ -335,11 +335,11 @@ ipcMain.handle('io:delete-files', async (_event, paths) => {
 });
 
 // --- OpenAI Whisper proxy (CORS-free) ---
-ipcMain.handle('stt:openai', async (_event, { bytes, language }) => {
+ipcMain.handle('stt:openai', async (_event, { bytes, language, apiKey }) => {
   try {
-    let key = '';
+    let key = apiKey || '';
     try {
-      if (fs.existsSync(keysStorePath)) {
+      if (!key && fs.existsSync(keysStorePath)) {
         const raw = await fs.promises.readFile(keysStorePath, 'utf-8');
         const obj = JSON.parse(raw);
         key = obj?.gpt || '';
