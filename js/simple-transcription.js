@@ -12,8 +12,9 @@ let FFmpegUtil = null;
 async function loadFFmpeg() {
     if (!FFmpeg) {
         try {
-            const ffmpegModule = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.7/dist/esm/index.js');
-            const utilModule = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js');
+            // 동일 출처에서 로드하여 워커/CSP 문제 회피
+            const ffmpegModule = await import('@ffmpeg/ffmpeg');
+            const utilModule = await import('@ffmpeg/util');
             FFmpeg = ffmpegModule;
             FFmpegUtil = utilModule;
             console.log('✅ FFmpeg 모듈 동적 로딩 완료');
@@ -567,45 +568,47 @@ async function compressWithFFmpegWasm(audioData, sampleRate) {
         updateTranscriptionProgress(45, '🎵 FFmpeg.wasm 초기화...', 'WebAssembly 엔진 시작');
 
         const coreBase = getFfmpegCoreBase();
-        const { createFFmpeg } = FFmpeg;
-        const ffmpeg = createFFmpeg({
-            log: true,
-            corePath: `${coreBase}ffmpeg-core.js`,
-            // 최신 @ffmpeg/ffmpeg는 corePath 사용, toBlobURL 없이도 동작
-        });
+        const CreateFn = (FFmpeg && (FFmpeg.createFFmpeg || (FFmpeg.default && FFmpeg.default.createFFmpeg)));
+        const FFmpegClass = (FFmpeg && (FFmpeg.FFmpeg || (FFmpeg.default && FFmpeg.default.FFmpeg)));
 
-        console.log('🔄 FFmpeg.wasm 로딩 시작...');
-        updateTranscriptionProgress(47, '🎵 FFmpeg.wasm 로딩 중...', 'WebAssembly 초기화');
+        let outputBlob;
+        if (typeof CreateFn === 'function') {
+            // createFFmpeg API
+            const ffmpeg = CreateFn({ log: true, corePath: `${coreBase}ffmpeg-core.js`, workerPath: `${coreBase}worker.js` });
+            console.log('🔄 FFmpeg.wasm 로딩 시작(createFFmpeg)...');
+            updateTranscriptionProgress(47, '🎵 FFmpeg.wasm 로딩 중...', 'WebAssembly 초기화');
+            await ffmpeg.load();
+            console.log('✅ FFmpeg.wasm 로딩 완료');
 
-        await ffmpeg.load();
-        console.log('✅ FFmpeg.wasm 로딩 완료');
+            updateTranscriptionProgress(48, '🎵 FFmpeg.wasm 인코딩 중...', 'WAV → FLAC 변환');
+            const wavBlob = createWavBlob(audioData, sampleRate);
+            ffmpeg.FS('writeFile', 'input.wav', await FFmpegUtil.fetchFile(wavBlob));
+            await ffmpeg.run('-i','input.wav','-vn','-ac','1','-ar', sampleRate.toString(),'-acodec','flac','output.flac');
+            const outData = ffmpeg.FS('readFile','output.flac');
+            outputBlob = new Blob([outData.buffer], { type: 'audio/flac' });
+            ffmpeg.FS('unlink','input.wav');
+            ffmpeg.FS('unlink','output.flac');
+        } else if (typeof FFmpegClass === 'function') {
+            // new FFmpeg() API
+            const ffmpeg = new FFmpegClass();
+            ffmpeg.on('log', ({ message }) => { /* optional log */ });
+            await ffmpeg.load({
+                coreURL: `${coreBase}ffmpeg-core.js`,
+                wasmURL: `${coreBase}ffmpeg-core.wasm`,
+                workerURL: `${coreBase}ffmpeg-core.worker.js`
+            });
+            const wavBlob = createWavBlob(audioData, sampleRate);
+            await ffmpeg.writeFile('input.wav', await FFmpegUtil.fetchFile(wavBlob));
+            await ffmpeg.exec(['-i','input.wav','-vn','-ac','1','-ar', sampleRate.toString(),'-acodec','flac','output.flac']);
+            const out = await ffmpeg.readFile('output.flac');
+            outputBlob = new Blob([out.buffer], { type: 'audio/flac' });
+        } else {
+            throw new Error('FFmpeg API에 접근할 수 없습니다 (createFFmpeg/FFmpeg 둘 다 없음)');
+        }
 
-        updateTranscriptionProgress(48, '🎵 FFmpeg.wasm 인코딩 중...', 'WAV → MP3 고품질 변환');
-
-        const wavBlob = createWavBlob(audioData, sampleRate);
-        
-        ffmpeg.FS('writeFile', 'input.wav', await FFmpegUtil.fetchFile(wavBlob));
-
-        // MP3 대신 FLAC로 압축해 STT 정확도 향상(용량은 커지나 분할 로직으로 보완)
-        await ffmpeg.run(
-            '-i', 'input.wav',
-            '-vn',
-            '-ac', '1',
-            '-ar', sampleRate.toString(),
-            '-acodec', 'flac',
-            'output.flac'
-        );
-
-        const outData = ffmpeg.FS('readFile', 'output.flac');
-        const mp3Blob = new Blob([outData.buffer], { type: 'audio/flac' });
-
-        ffmpeg.FS('unlink', 'input.wav');
-        ffmpeg.FS('unlink', 'output.flac');
-
-        updateTranscriptionProgress(52, '🎵 FFmpeg.wasm 완료', '고품질 MP3 압축 성공');
+        updateTranscriptionProgress(52, '🎵 FFmpeg.wasm 완료', '고품질 FLAC 압축 성공');
         console.log('✅ FFmpeg.wasm 압축 성공');
-
-        return mp3Blob;
+        return outputBlob;
 
     } catch (error) {
         console.error('❌ FFmpeg.wasm 실패:', error);

@@ -12,6 +12,10 @@ export default defineConfig({
           dest: 'ffmpeg'
         },
         {
+          src: 'node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js',
+          dest: 'ffmpeg'
+        },
+        {
           src: 'public/models/*',
           dest: 'models'
         }

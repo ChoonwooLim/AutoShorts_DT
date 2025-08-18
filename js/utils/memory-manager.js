@@ -6,7 +6,7 @@ class MemoryManager {
     constructor() {
         this.allocatedObjects = new WeakSet();
         this.cleanupTasks = [];
-        this.memoryThreshold = 100 * 1024 * 1024; // 100MB
+        this.memoryThreshold = 500 * 1024 * 1024; // 500MB
         this.monitoringInterval = null;
         this.isMonitoring = false;
     }
