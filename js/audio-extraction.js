@@ -263,19 +263,24 @@ function addSubtitleEntry(text, source) {
 async function extractAudio(file) {
     // 정확도 우선: FFmpeg 방식을 먼저 시도
     try {
-        if (!ffmpegLoaded) await loadFFmpeg();
-        console.log(`🎯 고정밀 FFmpeg 오디오 추출 시작: ${file.name}`);
-        
-        const result = await runFFmpegJob('extract_audio', { file });
-        const { buffers, count } = result;
-        
-        if (!buffers || buffers.length === 0) {
-            throw new Error('FFmpeg에서 오디오 버퍼를 추출하지 못했습니다.');
+        if (window.nativeFFmpeg && file?.path) {
+            console.log('🎯 네이티브 FFmpeg 오디오 추출 시작 (Electron)');
+            const { outPath } = await window.nativeFFmpeg.extractAudio(file.path);
+            const fileUrl = await window.nativeIO.readFileAsBlobUrl(outPath);
+            const resp = await fetch(fileUrl);
+            const blob = await resp.blob();
+            console.log(`✅ 네이티브 FFmpeg 추출 성공: ${Math.round(blob.size/1024)} KB`);
+            return [blob];
         }
         
-        console.log(`✅ 고정밀 FFmpeg 추출 성공: ${buffers.length}개 FLAC 조각 (30초 단위)`);
+        // 브라우저 환경 또는 Electron 브리지 미사용 시 wasm 경로 유지
+        if (!ffmpegLoaded) await loadFFmpeg();
+        console.log(`🎯 FFmpeg(wasm) 오디오 추출 시작: ${file.name}`);
+        const result = await runFFmpegJob('extract_audio', { file });
+        const { buffers } = result;
+        if (!buffers || buffers.length === 0) throw new Error('FFmpeg에서 오디오 버퍼를 추출하지 못했습니다.');
+        console.log(`✅ FFmpeg(wasm) 추출 성공: ${buffers.length}개`);
         updatePlaceholder(`✅ 고품질 오디오 추출 완료: ${buffers.length}개 조각`);
-        
         return buffers.map(buffer => new Blob([buffer], { type: 'audio/flac' }));
         
     } catch (error) {

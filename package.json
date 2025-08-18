@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "cross-env NODE_ENV=development electron .",
-    "dev:electron": "concurrently -k \"vite\" \"cross-env NODE_ENV=development ELECTRON_RENDERER_URL=https://localhost:5173 electron .\"",
+    "dev:electron": "concurrently -k \"vite\" \"cross-env NODE_ENV=development electron .\"",
     "build:app": "cross-env BUILD_TARGET=electron vite build",
     "electron:preview": "cross-env NODE_ENV=production electron .",
     "dist": "npm run build:app && cross-env NODE_ENV=production electron-builder -w"
@@ -30,6 +30,7 @@
     "@ffmpeg/core-mt": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.1",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@tensorflow-models/face-landmarks-detection": "1.0.6",
     "@tensorflow/tfjs": "^4.20.0",
     "d3-scale": "^4.0.2",

@@ -23,7 +23,7 @@ export default defineConfig({
     https: true,
     host: true,
     cors: true,
-    strictPort: true,
+    // 포트 점유 시 자동으로 다음 포트 사용
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',

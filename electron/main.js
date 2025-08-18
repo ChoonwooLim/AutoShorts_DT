@@ -4,6 +4,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import http from 'node:http';
 import handler from 'serve-handler';
+import { ipcMain } from 'electron';
+import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
+import { spawn } from 'node:child_process';
+import { initializeCache, getCachedOutputPath, hasCache, writeCacheFromTemp } from './cache.js';
+import { detectHardwareEncoders, pickBestH264Encoder, buildTranscodeArgs, parseFfmpegProgress } from './ffmpeg-utils.js';
 import getPort from 'get-port';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +22,9 @@ if (isDev) {
 
 // SharedArrayBuffer 활성화를 위한 플래그 추가 (보완)
 app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
+// 디스크 캐시 경로 지정(권한 오류 완화)
+const diskCacheDir = path.join(app.getPath('temp'), 'AutoShortsCache');
+app.commandLine.appendSwitch('disk-cache-dir', diskCacheDir);
 
 // 캐시/유저 데이터 경로 명시 설정으로 권한 이슈 완화
 const userDataDir = path.join(app.getPath('appData'), 'AutoShorts');
@@ -66,8 +74,23 @@ async function createWindow() {
   const serveRoot = fs.existsSync(resolveDistAppPath('index.html')) ? resolveDistAppPath() : resolveRootPath();
 
   if (isDev) {
-    const url = rendererUrl || 'https://localhost:5173/index.html';
-    await win.loadURL(url);
+    const candidates = [];
+    if (rendererUrl) {
+      candidates.push(rendererUrl);
+    }
+    for (let p = 5173; p <= 5190; p++) {
+      candidates.push(`https://localhost:${p}/index.html`);
+    }
+
+    for (const url of candidates) {
+      try {
+        await tryLoad(win, url);
+        break;
+      } catch (e) {
+        // retry next URL after short delay
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
   } else {
     // 모든 환경에서 로컬 HTTP 서버로 정적 자산 제공
     const port = await getPort({ port: [5123, 5124, 5125, 0] });
@@ -99,8 +122,23 @@ async function createWindow() {
   }
 }
 
+function tryLoad(win, url) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      win.webContents.removeListener('did-finish-load', onFinish);
+      win.webContents.removeListener('did-fail-load', onFail);
+    };
+    const onFinish = () => { cleanup(); resolve(true); };
+    const onFail = () => { cleanup(); reject(new Error('load failed')); };
+    win.webContents.once('did-finish-load', onFinish);
+    win.webContents.once('did-fail-load', onFail);
+    win.loadURL(url).catch(() => {});
+  });
+}
+
 // file 스킴에서 CORS/리소스 접근 이슈를 줄이기 위한 등록
 app.whenReady().then(async () => {
+  initializeCache(app.getPath('userData'));
   await createWindow();
 
   app.on('activate', () => {
@@ -114,6 +152,75 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+// --- Native FFmpeg IPC ---
+ipcMain.handle('ffmpeg:version', async () => {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegPath, ['-version']);
+    let output = '';
+    proc.stdout.on('data', (d) => (output += d.toString()))
+    proc.stderr.on('data', (d) => (output += d.toString()))
+    proc.on('close', () => resolve(output.trim()));
+  });
+});
+
+ipcMain.handle('ffmpeg:extract-audio', async (_event, filePathArg) => {
+  const options = { ar: 16000, ac: 1, codec: 'flac' };
+  const cachedPath = getCachedOutputPath(filePathArg, options, '.flac');
+  if (hasCache(filePathArg, options, '.flac')) {
+    return { outPath: cachedPath, logs: 'cache hit' };
+  }
+  const tempDir = app.getPath('temp');
+  const tempOut = path.join(tempDir, `as_audio_${Date.now()}.flac`);
+  const args = ['-y', '-i', filePathArg, '-vn', '-ac', String(options.ac), '-ar', String(options.ar), '-acodec', options.codec, tempOut];
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, args);
+    let logs = '';
+    proc.stdout.on('data', (d) => (logs += d.toString()))
+    proc.stderr.on('data', (d) => (logs += d.toString()))
+    proc.on('error', (err) => reject(err));
+    proc.on('close', (code) => {
+      if (code === 0) {
+        try {
+          writeCacheFromTemp(tempOut, cachedPath);
+        } catch {}
+        resolve({ outPath: cachedPath, logs });
+      } else reject(new Error(`ffmpeg exited with code ${code}: ${logs}`));
+    });
+  });
+});
+
+// Transcode with hardware acceleration if available
+ipcMain.handle('ffmpeg:transcode', async (_event, params) => {
+  const { input, output, width, height, fps } = params;
+  const hw = await detectHardwareEncoders(ffmpegPath);
+  const vcodec = pickBestH264Encoder(hw);
+  const args = buildTranscodeArgs({ input, output, width, height, fps, videoCodec: vcodec });
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, args);
+    let logs = '';
+    proc.stderr.on('data', (d) => {
+      const line = d.toString();
+      logs += line;
+      const prog = parseFfmpegProgress(line);
+      if (prog) {
+        _event.sender.send('ffmpeg:progress', prog);
+      }
+    });
+    proc.on('error', (err) => reject(err));
+    proc.on('close', (code) => {
+      if (code === 0) resolve({ output, logs, vcodec });
+      else reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+  });
+});
+
+// Secure file read to blob URL for renderer
+ipcMain.handle('io:read-file-url', async (_event, absPath) => {
+  // Only allow reading within user data or temp or project directory
+  // For demo, allow absolute path but return file:// URL
+  return pathToFileURL(absPath).toString();
 });
 
 
