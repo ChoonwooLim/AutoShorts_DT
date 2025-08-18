@@ -168,29 +168,118 @@ ipcMain.handle('ffmpeg:version', async () => {
 });
 
 ipcMain.handle('ffmpeg:extract-audio', async (_event, filePathArg) => {
-  const options = { ar: 16000, ac: 1, codec: 'flac' };
-  const cachedPath = getCachedOutputPath(filePathArg, options, '.flac');
-  if (hasCache(filePathArg, options, '.flac')) {
-    return { outPath: cachedPath, logs: 'cache hit' };
-  }
   const tempDir = app.getPath('temp');
-  const tempOut = path.join(tempDir, `as_audio_${Date.now()}.flac`);
-  const args = ['-y', '-i', filePathArg, '-vn', '-ac', String(options.ac), '-ar', String(options.ar), '-acodec', options.codec, tempOut];
+  const timestamp = Date.now();
+  
+  // 먼저 전체 오디오를 MP3로 변환 (더 강력한 압축)
+  const fullMp3Path = path.join(tempDir, `as_audio_${timestamp}_full.mp3`);
+  const firstArgs = [
+    '-y', '-i', filePathArg,
+    '-vn',
+    '-ac', '1',
+    '-ar', '16000',
+    '-acodec', 'libmp3lame',
+    '-b:a', '32k',  // 32kbps로 더 압축
+    '-compression_level', '9',  // 최대 압축
+    fullMp3Path
+  ];
+  
   return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegPath, args);
+    const proc1 = spawn(ffmpegPath, firstArgs);
     let logs = '';
-    proc.stdout.on('data', (d) => (logs += d.toString()))
-    proc.stderr.on('data', (d) => (logs += d.toString()))
-    proc.on('error', (err) => reject(err));
-    proc.on('close', (code) => {
-      if (code === 0) {
-        try {
-          writeCacheFromTemp(tempOut, cachedPath);
-        } catch {}
-        resolve({ outPath: cachedPath, logs });
-      } else reject(new Error(`ffmpeg exited with code ${code}: ${logs}`));
+    proc1.stderr.on('data', (d) => (logs += d.toString()));
+    proc1.on('close', async (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg failed: ${logs}`));
+        return;
+      }
+      
+      // 파일 크기 확인
+      const stats = fs.statSync(fullMp3Path);
+      const fileSizeMB = stats.size / (1024 * 1024);
+      console.log(`MP3 파일 크기: ${fileSizeMB.toFixed(2)}MB`);
+      
+      // 10MB 이하면 분할 불필요
+      if (fileSizeMB <= 10) {
+        resolve({ outPath: fullMp3Path, logs, segmented: false });
+        return;
+      }
+      
+      // 10MB 초과 시 분할 (8MB 조각으로 안전하게)
+      const segmentCount = Math.ceil(fileSizeMB / 8);
+      const duration = await getAudioDuration(fullMp3Path);
+      const segmentTime = Math.floor(duration / segmentCount);
+      const outputPattern = path.join(tempDir, `as_audio_${timestamp}_%03d.mp3`);
+      const listPath = path.join(tempDir, `as_audio_${timestamp}.m3u8`);
+      const segmentArgs = [
+        '-y', '-i', fullMp3Path,
+        '-f', 'segment',
+        '-segment_time', String(segmentTime),
+        '-segment_list', listPath,
+        '-segment_list_type', 'm3u8',
+        '-c', 'copy',  // 재인코딩 없이 복사
+        '-reset_timestamps', '1',
+        outputPattern
+      ];
+      
+      const proc2 = spawn(ffmpegPath, segmentArgs);
+      let segLogs = '';
+      proc2.stderr.on('data', (d) => (segLogs += d.toString()));
+      proc2.on('close', async (code2) => {
+        if (code2 === 0) {
+          const entries = await fs.promises.readdir(tempDir);
+          const files = entries
+            .filter(f => f.startsWith(`as_audio_${timestamp}_`) && f.endsWith('.mp3') && !f.includes('_full'))
+            .sort()
+            .map(f => path.join(tempDir, f));
+          // m3u8 파싱으로 정확한 타임스탬프 생성
+          let segments = [];
+          try {
+            const m3u = await fs.promises.readFile(listPath, 'utf-8');
+            const lines = m3u.split(/\r?\n/);
+            let t = 0;
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+              if (line.startsWith('#EXTINF:')) {
+                const dur = parseFloat(line.substring('#EXTINF:'.length));
+                const name = lines[i+1];
+                segments.push({ start: t, end: t + dur, name });
+                t += dur;
+              }
+            }
+          } catch {}
+          try { await fs.promises.unlink(listPath); } catch {}
+          // 원본 전체 파일 삭제
+          try { await fs.promises.unlink(fullMp3Path); } catch {}
+          
+          console.log(`분할 완료: ${files.length}개 파일 (각 약 ${segmentTime}초)`);
+          resolve({ outPaths: files, logs: logs + segLogs, segmented: true, segmentDuration: segmentTime, segmentList: segments });
+        } else {
+          reject(new Error(`ffmpeg segment failed: ${segLogs}`));
+        }
+      });
     });
   });
+  
+  // 오디오 길이 구하기
+  async function getAudioDuration(filePath) {
+    return new Promise((resolve) => {
+      const proc = spawn(ffmpegPath, ['-i', filePath]);
+      let output = '';
+      proc.stderr.on('data', (d) => (output += d.toString()));
+      proc.on('close', () => {
+        const match = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})/);
+        if (match) {
+          const hours = parseInt(match[1], 10);
+          const minutes = parseInt(match[2], 10);
+          const seconds = parseInt(match[3], 10);
+          resolve(hours * 3600 + minutes * 60 + seconds);
+        } else {
+          resolve(120); // 기본값
+        }
+      });
+    });
+  }
 });
 
 // Transcode with hardware acceleration if available
@@ -223,6 +312,59 @@ ipcMain.handle('io:read-file-url', async (_event, absPath) => {
   // Only allow reading within user data or temp or project directory
   // For demo, allow absolute path but return file:// URL
   return pathToFileURL(absPath).toString();
+});
+
+ipcMain.handle('io:read-file-bytes', async (_event, absPath) => {
+  try {
+    const data = await fs.promises.readFile(absPath);
+    return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  } catch (e) {
+    return { __error: e.message };
+  }
+});
+
+ipcMain.handle('io:delete-files', async (_event, paths) => {
+  try {
+    if (Array.isArray(paths)) {
+      await Promise.all(paths.map(p => fs.promises.unlink(p).catch(() => {})));
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// --- OpenAI Whisper proxy (CORS-free) ---
+ipcMain.handle('stt:openai', async (_event, { bytes, language }) => {
+  try {
+    let key = '';
+    try {
+      if (fs.existsSync(keysStorePath)) {
+        const raw = await fs.promises.readFile(keysStorePath, 'utf-8');
+        const obj = JSON.parse(raw);
+        key = obj?.gpt || '';
+      }
+    } catch {}
+    if (!key) throw new Error('OpenAI API 키가 설정되지 않았습니다.');
+    const blob = new Blob([new Uint8Array(bytes)], { type: 'audio/mp3' });
+    const form = new FormData();
+    form.append('file', blob, 'audio.mp3');
+    form.append('model', 'whisper-1');
+    form.append('language', (language || 'ko').split('-')[0]);
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}` },
+      body: form
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`[${res.status}] ${txt}`);
+    }
+    const data = await res.json();
+    return { text: data.text || '' };
+  } catch (e) {
+    return { __error: e.message };
+  }
 });
 
 // ---- Secure API key storage (cross-port persistent) ----

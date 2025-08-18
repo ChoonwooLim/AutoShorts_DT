@@ -120,17 +120,20 @@ self.onmessage = async ({ data }) => {
             await ffmpeg.writeFile(inputFileName, await fetchFile(file));
             console.log(`📁 입력 파일 준비: ${inputFileName}`);
 
-            const segmentTime = 30;
-            const outputPattern = `chunk_%03d.flac`;
+            // MP3로 변환하여 용량 축소 - 60초 단위로 분할
+            const segmentTime = 60;
+            const outputPattern = `chunk_%03d.mp3`;
             
             await ffmpeg.exec([
                 '-i', inputFileName,
                 '-f', 'segment',
                 '-segment_time', segmentTime.toString(),
                 '-vn',
-                '-acodec', 'flac',
+                '-acodec', 'libmp3lame',
+                '-b:a', '32k',  // 32kbps로 더 압축
                 '-ar', '16000',
                 '-ac', '1',
+                '-compression_level', '9',  // 최대 압축
                 '-avoid_negative_ts', 'make_zero',
                 outputPattern
             ]);
@@ -141,8 +144,8 @@ self.onmessage = async ({ data }) => {
             const files = await ffmpeg.listDir('.');
             
             for (const f of files) {
-                if (f.name.startsWith('chunk_') && f.name.endsWith('.flac')) {
-                    console.log(`📦 조각 발견: ${f.name}`);
+                if (f.name.startsWith('chunk_') && f.name.endsWith('.mp3')) {
+                    console.log(`📦 MP3 조각 발견: ${f.name} (${(f.size / 1024).toFixed(1)}KB)`);
                     const data = await ffmpeg.readFile(f.name);
                     audioChunks.push({ name: f.name, data: data.buffer });
                     

@@ -87,14 +87,14 @@ function runFFmpegJob(type, data) {
         
         console.log(`🚀 FFmpeg 작업 시작: ${type} (Job ID: ${id})`);
         
-        // 타임아웃 설정 (360초로 대폭 증가)
+        // 타임아웃 설정 (10분으로 연장)
         const timeout = setTimeout(() => {
             if (jobs[id]) {
                 console.error(`⏰ FFmpeg 작업 타임아웃 (Job ${id}): ${type}`);
                 delete jobs[id];
-                reject(new Error(`FFmpeg 작업 타임아웃 (${type}). 360초 내에 완료되지 않았습니다.`));
+                reject(new Error(`FFmpeg 작업 타임아웃 (${type}). 600초 내에 완료되지 않았습니다.`));
             }
-        }, 360000);
+        }, 600000);
         
         // 작업 완료시 타임아웃 해제
         const originalResolve = jobs[id].resolve;
@@ -144,6 +144,13 @@ async function loadFFmpeg() {
 }
 
 // --- Transcription Logic ---
+
+// 타임스탬프 포맷팅 함수 (초 -> MM:SS 형식)
+function formatTimestamp(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
 
 // 🎯 자막 텍스트 포맷팅 함수들
 function formatSubtitleText(text) {
@@ -215,6 +222,87 @@ function updatePlaceholder(text) {
     }
 }
 
+// 타임스탬프가 포함된 자막 추가 함수
+function addSubtitleEntryWithTimestamp(timestampedText, plainText, segments, source) {
+    // 기존 사이드 패널에도 추가 (호환성 유지)
+    if (subtitlePlaceholder) {
+        subtitlePlaceholder.style.display = 'none';
+    }
+    const entry = document.createElement('div');
+    entry.className = 'subtitle-entry';
+    entry.innerHTML = `<p class="source">[${source}]</p><p class="text">${plainText}</p>`;
+    subtitleContainer.appendChild(entry);
+    subtitleContainer.scrollTop = subtitleContainer.scrollHeight;
+    
+    // 🆕 새로운 하단 자막 결과 영역에 타임스탬프와 함께 추가
+    const subtitleResultsContainer = document.getElementById('subtitleResultsContainer');
+    if (subtitleResultsContainer) {
+        // 플레이스홀더 제거
+        const placeholder = subtitleResultsContainer.querySelector('.subtitle-placeholder-results');
+        if (placeholder) {
+            placeholder.remove();
+        }
+        
+        // 타임스탬프가 포함된 자막을 문단별로 포맷팅
+        const formattedSegments = segments.map(seg => {
+            // 각 세그먼트의 텍스트를 문장별로 분리
+            const sentences = seg.text.split(/([.!?]+\s*)/).filter(part => part.trim());
+            let formattedText = '';
+            let currentSentence = '';
+            
+            for (let i = 0; i < sentences.length; i++) {
+                const part = sentences[i];
+                if (/^[.!?]+\s*$/.test(part)) {
+                    currentSentence += part.trim();
+                    if (currentSentence.trim()) {
+                        // 첫 문장에만 타임스탬프 추가
+                        if (formattedText === '') {
+                            formattedText = `[${seg.timestamp}] ${currentSentence.trim()}`;
+                        } else {
+                            formattedText += '\n' + currentSentence.trim();
+                        }
+                        currentSentence = '';
+                    }
+                } else {
+                    currentSentence += part;
+                }
+            }
+            
+            // 남은 문장 처리
+            if (currentSentence.trim()) {
+                if (formattedText === '') {
+                    formattedText = `[${seg.timestamp}] ${currentSentence.trim()}`;
+                } else {
+                    formattedText += '\n' + currentSentence.trim();
+                }
+            }
+            
+            return formattedText;
+        }).join('\n\n');
+        
+        // 새로운 자막 엔트리 생성
+        const resultEntry = document.createElement('div');
+        resultEntry.className = 'subtitle-result-entry';
+        resultEntry.innerHTML = `
+            <div class="subtitle-source">${source}</div>
+            <div class="subtitle-text" style="white-space: pre-wrap; font-family: monospace;">${formattedSegments}</div>
+            <div class="subtitle-meta">
+                <span>추출 시간: ${new Date().toLocaleString()}</span>
+                <span>길이: ${plainText.length}자 • ${countSentences(plainText)}개 문장 • ${segments.length}개 세그먼트</span>
+            </div>
+        `;
+        
+        // 최신 결과를 맨 위에 추가
+        subtitleResultsContainer.insertBefore(resultEntry, subtitleResultsContainer.firstChild);
+        
+        // 스크롤을 맨 위로 이동 (최신 결과 보이게)
+        subtitleResultsContainer.scrollTop = 0;
+        
+        console.log('✅ 타임스탬프가 포함된 자막 결과가 추가되었습니다');
+    }
+}
+
+// 기존 함수 (호환성 유지)
 function addSubtitleEntry(text, source) {
     // 기존 사이드 패널에도 추가 (호환성 유지)
     if (subtitlePlaceholder) {
@@ -260,16 +348,38 @@ function addSubtitleEntry(text, source) {
     }
 }
 
+
 async function extractAudio(file) {
     // 정확도 우선: FFmpeg 방식을 먼저 시도
     try {
         if (window.nativeFFmpeg && file?.path) {
             console.log('🎯 네이티브 FFmpeg 오디오 추출 시작 (Electron)');
-            const { outPath } = await window.nativeFFmpeg.extractAudio(file.path);
-            const fileUrl = await window.nativeIO.readFileAsBlobUrl(outPath);
-            const resp = await fetch(fileUrl);
-            const blob = await resp.blob();
-            console.log(`✅ 네이티브 FFmpeg 추출 성공: ${Math.round(blob.size/1024)} KB`);
+            const result = await window.nativeFFmpeg.extractAudio(file.path);
+            
+            // FFmpeg가 이미 분할한 경우
+            if (result.segmented && result.outPaths) {
+                const chunks = [];
+                for (const filePath of result.outPaths) {
+                    const bytes = await window.nativeIO.readFileBytes(filePath);
+                    if (bytes && bytes.__error) throw new Error(bytes.__error);
+                    const blob = new Blob([new Uint8Array(bytes)], { type: 'audio/mp3' });
+                    console.log(`✅ MP3 조각 로드: ${Math.round(blob.size/1024)} KB`);
+                    chunks.push(blob);
+                }
+                console.log(`✅ 네이티브 FFmpeg 추출 성공: ${chunks.length}개 MP3 조각`);
+                // 세그먼트 정보 추가
+                if (result.segmentDuration) {
+                    chunks._segmentDuration = result.segmentDuration;
+                }
+                return chunks;
+            }
+            
+            // 단일 파일인 경우 (이전 버전 호환성)
+            const { outPath } = result;
+            const bytes = await window.nativeIO.readFileBytes(outPath);
+            if (bytes && bytes.__error) throw new Error(bytes.__error);
+            const blob = new Blob([new Uint8Array(bytes)], { type: 'audio/mp3' });
+            console.log(`✅ 네이티브 FFmpeg 추출 성공 (MP3): ${Math.round(blob.size/1024)} KB`);
             return [blob];
         }
         
@@ -281,7 +391,9 @@ async function extractAudio(file) {
         if (!buffers || buffers.length === 0) throw new Error('FFmpeg에서 오디오 버퍼를 추출하지 못했습니다.');
         console.log(`✅ FFmpeg(wasm) 추출 성공: ${buffers.length}개`);
         updatePlaceholder(`✅ 고품질 오디오 추출 완료: ${buffers.length}개 조각`);
-        return buffers.map(buffer => new Blob([buffer], { type: 'audio/flac' }));
+        
+        // FFmpeg Worker가 이미 적절히 분할했으므로 그대로 사용
+        return buffers.map(buffer => new Blob([buffer], { type: 'audio/mp3' }));
         
     } catch (error) {
         console.warn(`⚠️ FFmpeg 추출 실패, 대안 방식으로 전환:`, error.message);
@@ -292,42 +404,39 @@ async function extractAudio(file) {
     }
 }
 
-// 브라우저 내장 기능을 사용한 간단한 오디오 처리
+// FFmpeg.wasm을 사용한 오디오 처리
 async function extractAudioFallback(file) {
-    console.log(`🔄 브라우저 내장 방식으로 오디오 처리: ${file.name}`);
+    console.log(`🔄 FFmpeg.wasm으로 오디오 처리: ${file.name}`);
     
     try {
-        updatePlaceholder('🎵 영상 파일을 오디오로 변환 중...');
+        updatePlaceholder('🎵 FFmpeg.wasm으로 오디오 추출 중...');
         
-        // 파일을 직접 오디오 형태로 처리
-        const audioBlob = new Blob([file], { 
-            type: file.type.includes('video') ? 'video/mp4' : 'audio/wav' 
-        });
+        // FFmpeg.wasm을 사용하여 오디오 추출
+        if (!ffmpegLoaded) await loadFFmpeg();
         
-        // 파일 크기 기반 조각 결정 (더 간단하게)
-        const fileSizeMB = file.size / (1024 * 1024);
-        let chunkCount;
+        console.log(`📊 파일 크기: ${(file.size / (1024 * 1024)).toFixed(2)}MB`);
         
-        if (fileSizeMB < 10) {
-            chunkCount = 1; // 10MB 미만: 1조각
-        } else if (fileSizeMB < 50) {
-            chunkCount = 2; // 50MB 미만: 2조각  
-        } else {
-            chunkCount = 3; // 그 이상: 3조각
+        const result = await runFFmpegJob('extract_audio', { file });
+        const { buffers } = result;
+        
+        if (!buffers || buffers.length === 0) {
+            throw new Error('FFmpeg에서 오디오를 추출하지 못했습니다.');
         }
         
-        console.log(`📊 파일 크기: ${fileSizeMB.toFixed(1)}MB → ${chunkCount}개 조각으로 처리`);
-        updatePlaceholder(`📊 ${chunkCount}개 조각으로 분할하여 처리합니다...`);
+        console.log(`✅ FFmpeg.wasm 오디오 추출 성공: ${buffers.length}개 조각`);
         
-        // 실제로는 같은 파일을 여러번 처리 (API 제한 회피용)
-        const chunks = Array(chunkCount).fill(audioBlob);
+        // MP3 Blob으로 변환
+        const chunks = buffers.map(buffer => {
+            const blob = new Blob([buffer], { type: 'audio/mp3' });
+            console.log(`📦 오디오 조각 크기: ${Math.round(blob.size/1024/1024 * 100)/100}MB`);
+            return blob;
+        });
         
-        console.log(`✅ 오디오 처리 완료: ${chunks.length}개 조각 준비됨`);
         return chunks;
         
     } catch (error) {
-        console.error(`❌ 오디오 처리 실패:`, error);
-        throw new Error(`오디오 처리 실패: ${error.message}\n\n💡 해결방법:\n1. MP4 형식 영상 파일 사용\n2. 파일 크기 100MB 이하 권장\n3. 브라우저 새로고침 후 재시도`);
+        console.error(`❌ FFmpeg.wasm 오디오 처리 실패:`, error);
+        throw new Error(`오디오 처리 실패: ${error.message}\n\n💡 해결방법:\n1. 파일 크기를 줄여보세요\n2. 브라우저를 새로고침하세요`);
     }
 }
 
@@ -460,7 +569,7 @@ async function transcribeWithOpenAI(audioBlob) {
         updatePlaceholder('OpenAI Whisper로 음성 인식 중...');
         
         const formData = new FormData();
-        formData.append('file', audioBlob, 'audio.flac');
+        formData.append('file', audioBlob, 'audio.mp3');
         formData.append('model', 'whisper-1');
         formData.append('language', document.getElementById('sourceLang').value.split('-')[0]);
 
@@ -494,6 +603,31 @@ async function transcribeWithOpenAI(audioBlob) {
     } catch (error) {
         console.error('OpenAI 음성 인식 오류:', error);
         throw error; // 상위 함수에서 처리하도록 전파
+    }
+}
+
+// 프록시 버전 (CORS 회피)
+async function transcribeWithOpenAIViaProxy(audioBlob) {
+    const apiKey = await getApiKey('gpt');
+    if (!apiKey) {
+        throw new Error('OpenAI (GPT) API 키를 설정해주세요.\n\n⚙️ 해결방법:\n1. 화면 하단 ⚙️ 버튼 클릭\n2. OpenAI API 키 입력\n3. https://platform.openai.com/api-keys 에서 발급');
+    }
+
+    try {
+        updatePlaceholder('OpenAI Whisper(프록시)로 음성 인식 중...');
+        const arrBuf = await audioBlob.arrayBuffer();
+        const res = await window.sttProxy.openai(arrBuf, document.getElementById('sourceLang').value);
+        if (res && res.__error) throw new Error(res.__error);
+        const text = (res && res.text) ? res.text.trim() : '';
+        if (text) {
+            console.log(`✅ OpenAI(프록시) 음성 인식 성공: ${text.substring(0, 50)}...`);
+            return text;
+        }
+        console.warn('⚠️ OpenAI(프록시)에서 텍스트를 인식하지 못했습니다.');
+        return '(인식된 텍스트 없음)';
+    } catch (error) {
+        console.error('OpenAI(프록시) 음성 인식 오류:', error);
+        throw error;
     }
 }
 
@@ -539,31 +673,63 @@ async function startTranscription() {
         
         updatePlaceholder(`🚀 ${audioBlobs.length}개 오디오 조각을 ${selectedModel === 'google' ? 'Google STT' : 'OpenAI Whisper'}로 처리 중...`);
 
-        const transcriptionEngine = selectedModel === 'google' ? transcribeWithGoogle : transcribeWithOpenAI;
+        const transcriptionEngine = selectedModel === 'google' ? transcribeWithGoogle : transcribeWithOpenAIViaProxy;
 
         // 각 오디오 조각 처리 (순차적으로 처리하여 API 부하 방지)
         const results = [];
+        // 세그먼트 지속 시간 동적 계산 (분할된 경우 결과에서 가져옴)
+        let segmentDuration = 120; // 기본값
+        
+        // extractAudio 결과에서 세그먼트 정보 확인
+        if (audioBlobs._segmentDuration) {
+            segmentDuration = audioBlobs._segmentDuration;
+        }
+        
         for (let i = 0; i < audioBlobs.length; i++) {
             try {
                 updatePlaceholder(`🎯 음성 인식 중... (${i + 1}/${audioBlobs.length})`);
-                const text = await transcriptionEngine(audioBlobs[i]);
-                results.push({ index: i, text: text || '' });
-                console.log(`✅ 조각 ${i + 1} 처리 완료: ${text ? text.substring(0, 30) + '...' : '(무음)'}`);
+                const blob = audioBlobs[i];
+                console.log(`🔊 조각 ${i + 1} 크기: ${Math.round(blob.size/1024/1024 * 100)/100}MB`);
+                
+                const text = await transcriptionEngine(blob);
+                const startTime = i * segmentDuration; // 각 조각의 시작 시간 계산
+                results.push({ 
+                    index: i, 
+                    text: text || '', 
+                    startTime: startTime,
+                    timestamp: formatTimestamp(startTime)
+                });
+                console.log(`✅ 조각 ${i + 1} 처리 완료 [${formatTimestamp(startTime)}]: ${text ? text.substring(0, 30) + '...' : '(무음)'}`);
             } catch (chunkError) {
                 console.warn(`⚠️ 조각 ${i + 1} 처리 실패:`, chunkError.message);
-                results.push({ index: i, text: `(처리 실패: ${chunkError.message.split('\n')[0]})` });
+                const startTime = i * segmentDuration;
+                results.push({ 
+                    index: i, 
+                    text: `(처리 실패: ${chunkError.message.split('\n')[0]})`,
+                    startTime: startTime,
+                    timestamp: formatTimestamp(startTime)
+                });
             }
         }
 
-        // 순서대로 정렬 후 합치기
-        const fullTranscript = results
+        // 순서대로 정렬 후 타임스탬프와 함께 처리
+        const validResults = results
             .sort((a, b) => a.index - b.index)
-            .map(r => r.text)
-            .filter(text => text && text.trim() && !text.includes('처리 실패'))
-            .join(' ');
-
-        if (fullTranscript.trim()) {
-            addSubtitleEntry(fullTranscript, selectedModel === 'google' ? 'Google STT' : 'OpenAI Whisper');
+            .filter(r => r.text && r.text.trim() && !r.text.includes('처리 실패'));
+        
+        if (validResults.length > 0) {
+            // 타임스탬프가 포함된 자막 생성
+            const timestampedSubtitles = validResults
+                .map(r => `[${r.timestamp}] ${r.text}`)
+                .join('\n\n');
+            
+            // 기본 텍스트만 추출 (호환성 유지)
+            const fullTranscript = validResults
+                .map(r => r.text)
+                .join(' ');
+            
+            // 타임스탬프가 포함된 자막과 결과 데이터 전달
+            addSubtitleEntryWithTimestamp(timestampedSubtitles, fullTranscript, validResults, selectedModel === 'google' ? 'Google STT' : 'OpenAI Whisper');
             updatePlaceholder('✅ 자막 추출 완료!');
             console.log(`🎉 자막 추출 성공: ${fullTranscript.length}자`);
         } else {

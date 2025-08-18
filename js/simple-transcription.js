@@ -265,28 +265,22 @@ async function extractAudioWithWebAPI(file) {
         
         const resampledData = resampleAudio(channelData, audioBuffer.sampleRate, targetSampleRate);
 
-        // 선택된 압축 방식에 따라 분기 (강제 폴백 제거)
-        const method = getSelectedCompressionMethod();
+        // FFmpeg.wasm 방식만 사용
+        const method = 'ffmpeg-wasm';
         console.log(`🎵 선택된 압축 방식 적용: ${method}`);
         updateTranscriptionProgress(40, '🎵 오디오 압축 중...', `${method} 방식으로 전체 오디오 압축`);
 
         let compressedBlob;
-        if (method === 'ffmpeg-wasm') {
-            // FFmpeg.wasm 사용 시 폴백 금지: 실패하면 예외를 던져 사용자에게 알림
-            compressedBlob = await compressWithFFmpegWasm(resampledData, targetSampleRate);
-        } else if (method === 'web-workers') {
-            compressedBlob = await compressWithWebWorkers(resampledData, targetSampleRate);
-        } else {
-            compressedBlob = await compressWithMediaRecorder(resampledData, targetSampleRate);
-        }
-        const compressedSizeMB = compressedBlob.size / (1024 / 1024);
+        // FFmpeg.wasm 방식만 사용
+        compressedBlob = await compressWithFFmpegWasm(resampledData, targetSampleRate);
+        const compressedSizeMB = compressedBlob.size / (1024 * 1024);
         
         console.log(`✅ 전체 MP3 압축 완료: ${compressedSizeMB.toFixed(2)}MB`);
         updateTranscriptionProgress(60, '🗜️ 압축 완료', `전체 크기: ${compressedSizeMB.toFixed(2)}MB`);
 
         // OpenAI Whisper의 경우 25MB 미만이면 분할하지 않음
         const openaiLimit = 24 * 1024 * 1024; // 24MB로 안전 마진 설정
-        if (compressedMp3Blob.size < openaiLimit) {
+        if (compressedBlob.size < openaiLimit) {
             console.log('✅ 파일 크기가 작아 분할이 필요 없습니다. 전체 파일을 사용합니다.');
             updateTranscriptionProgress(65, '✅ 분할 불필요', '정확도 최상으로 처리');
             return [{
@@ -580,14 +574,15 @@ async function compressWithFFmpegWasm(audioData, sampleRate) {
             await ffmpeg.load();
             console.log('✅ FFmpeg.wasm 로딩 완료');
 
-            updateTranscriptionProgress(48, '🎵 FFmpeg.wasm 인코딩 중...', 'WAV → FLAC 변환');
+            updateTranscriptionProgress(48, '🎵 FFmpeg.wasm 인코딩 중...', 'WAV → MP3 변환 (용량 축소)');
             const wavBlob = createWavBlob(audioData, sampleRate);
             ffmpeg.FS('writeFile', 'input.wav', await FFmpegUtil.fetchFile(wavBlob));
-            await ffmpeg.run('-i','input.wav','-vn','-ac','1','-ar', sampleRate.toString(),'-acodec','flac','output.flac');
-            const outData = ffmpeg.FS('readFile','output.flac');
-            outputBlob = new Blob([outData.buffer], { type: 'audio/flac' });
+            // MP3로 변환하여 용량 축소 (64kbps)
+            await ffmpeg.run('-i','input.wav','-vn','-ac','1','-ar', sampleRate.toString(),'-acodec','libmp3lame','-b:a','64k','output.mp3');
+            const outData = ffmpeg.FS('readFile','output.mp3');
+            outputBlob = new Blob([outData.buffer], { type: 'audio/mp3' });
             ffmpeg.FS('unlink','input.wav');
-            ffmpeg.FS('unlink','output.flac');
+            ffmpeg.FS('unlink','output.mp3');
         } else if (typeof FFmpegClass === 'function') {
             // new FFmpeg() API
             const ffmpeg = new FFmpegClass();
@@ -599,14 +594,15 @@ async function compressWithFFmpegWasm(audioData, sampleRate) {
             });
             const wavBlob = createWavBlob(audioData, sampleRate);
             await ffmpeg.writeFile('input.wav', await FFmpegUtil.fetchFile(wavBlob));
-            await ffmpeg.exec(['-i','input.wav','-vn','-ac','1','-ar', sampleRate.toString(),'-acodec','flac','output.flac']);
-            const out = await ffmpeg.readFile('output.flac');
-            outputBlob = new Blob([out.buffer], { type: 'audio/flac' });
+            // MP3로 변환하여 용량 축소 (64kbps)
+            await ffmpeg.exec(['-i','input.wav','-vn','-ac','1','-ar', sampleRate.toString(),'-acodec','libmp3lame','-b:a','64k','output.mp3']);
+            const out = await ffmpeg.readFile('output.mp3');
+            outputBlob = new Blob([out.buffer], { type: 'audio/mp3' });
         } else {
             throw new Error('FFmpeg API에 접근할 수 없습니다 (createFFmpeg/FFmpeg 둘 다 없음)');
         }
 
-        updateTranscriptionProgress(52, '🎵 FFmpeg.wasm 완료', '고품질 FLAC 압축 성공');
+        updateTranscriptionProgress(52, '🎵 FFmpeg.wasm 완료', 'MP3 압축 성공 (용량 축소)');
         console.log('✅ FFmpeg.wasm 압축 성공');
         return outputBlob;
 
@@ -822,31 +818,31 @@ async function encodeToMp3UsingMediaRecorder(audioBuffer, audioContext) {
 async function splitAudioBlob(audioBlob, duration) {
     const sizeMB = audioBlob.size / (1024 * 1024);
     
-    // Google STT: 9.5MB 안전 제한, OpenAI: 20MB
-    const googleSafeLimit = 9.5 * 1024 * 1024; // 9.5MB (최적 크기)
-    const openaiLimit = 20 * 1024 * 1024; // 20MB
+    // 더 작은 크기로 안전하게 분할 (OpenAI API 제한 고려)
+    const safeSizeLimit = 10 * 1024 * 1024; // 10MB로 안전하게 설정
+    const openaiLimit = 20 * 1024 * 1024; // 20MB (실제로는 25MB지만 안전 마진)
     
     console.log(`📊 스마트 분할 분석: ${sizeMB.toFixed(2)}MB, ${duration.toFixed(1)}초`);
     
     // 분할이 필요한지 확인
-    if (audioBlob.size <= googleSafeLimit) {
-        console.log(`✅ 분할 불필요: Google STT 최적 크기 (${sizeMB.toFixed(2)}MB ≤ 9.5MB)`);
+    if (audioBlob.size <= safeSizeLimit) {
+        console.log(`✅ 분할 불필요: 안전 크기 (${sizeMB.toFixed(2)}MB ≤ 10MB)`);
         return [{ blob: audioBlob, index: 0, totalChunks: 1 }];
     }
     
-    // 수학적 분할 계산: 오디오 최대크기 / X = < 9.5MB
-    // 따라서 X = Math.ceil(오디오 최대크기 / 9.5MB)
-    const optimalChunks = Math.ceil(audioBlob.size / googleSafeLimit);
+    // 수학적 분할 계산: 오디오 최대크기 / X = < 10MB
+    // 따라서 X = Math.ceil(오디오 최대크기 / 10MB)
+    const optimalChunks = Math.ceil(audioBlob.size / safeSizeLimit);
     const chunkSizeMB = sizeMB / optimalChunks;
     const chunkDuration = duration / optimalChunks;
     
     console.log(`🧮 수학적 분할 계산:`);
-    console.log(`   📊 X = Math.ceil(${sizeMB.toFixed(2)}MB / 9.5MB) = ${optimalChunks}개`);
+    console.log(`   📊 X = Math.ceil(${sizeMB.toFixed(2)}MB / 10MB) = ${optimalChunks}개`);
     console.log(`   📏 각 조각: ${chunkSizeMB.toFixed(2)}MB, ${chunkDuration.toFixed(1)}초`);
-    console.log(`   ✅ Google STT 호환: ${chunkSizeMB <= 9.5 ? '완벽' : '재계산 필요'}`);
+    console.log(`   ✅ API 호환: ${chunkSizeMB <= 10 ? '완벽' : '재계산 필요'}`);
     
     // 안전성 재확인 (혹시 계산 오차가 있을 경우)
-    if (chunkSizeMB > 9.5) {
+    if (chunkSizeMB > 10) {
         const safeChunks = optimalChunks + 1;
         const safeSizeMB = sizeMB / safeChunks;
         console.log(`⚠️ 안전 마진 추가: ${optimalChunks}개 → ${safeChunks}개 (각 ${safeSizeMB.toFixed(2)}MB)`);
@@ -962,7 +958,7 @@ async function transcribeWithOpenAI(audioBlob, chunkStartTime = 0) {
         console.log(`🌐 OpenAI Whisper 언어 설정: ${language} (${languageCode})`);
         
         const formData = new FormData();
-        formData.append('file', audioBlob, 'audio.wav');
+        formData.append('file', audioBlob, 'audio.mp3');
         formData.append('model', 'whisper-1');
         formData.append('language', language);
         formData.append('response_format', 'verbose_json');

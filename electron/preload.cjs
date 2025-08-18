@@ -10,12 +10,17 @@ contextBridge.exposeInMainWorld('nativeFFmpeg', {
 });
 
 contextBridge.exposeInMainWorld('nativeIO', {
-  readFileAsBlobUrl: async (absolutePath) => ipcRenderer.invoke('io:read-file-url', absolutePath)
+  readFileAsBlobUrl: async (absolutePath) => ipcRenderer.invoke('io:read-file-url', absolutePath),
+  readFileBytes: async (absolutePath) => ipcRenderer.invoke('io:read-file-bytes', absolutePath)
 });
 
 contextBridge.exposeInMainWorld('secureKeys', {
   load: () => ipcRenderer.invoke('keys:load'),
   save: (data) => ipcRenderer.invoke('keys:save', data)
+});
+
+contextBridge.exposeInMainWorld('sttProxy', {
+  openai: (bytes, language) => ipcRenderer.invoke('stt:openai', { bytes, language })
 });
 
 
