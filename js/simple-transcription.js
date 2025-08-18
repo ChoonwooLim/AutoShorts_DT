@@ -38,6 +38,12 @@ export async function initializeTranscription() {
         
         // 이벤트 리스너 설정
         setupTranscriptionEventListeners();
+
+        // 버튼 강제 활성화 (HTML 초기 상태가 disabled인 경우 대비)
+        const btn = document.getElementById('startTranscriptionBtn');
+        const container = document.getElementById('subtitleContainer');
+        if (btn) btn.disabled = false;
+        if (container) container.style.display = 'block';
         
         console.log('✅ Transcription system initialized successfully');
         return true;
@@ -258,12 +264,21 @@ async function extractAudioWithWebAPI(file) {
         
         const resampledData = resampleAudio(channelData, audioBuffer.sampleRate, targetSampleRate);
 
-        console.log('압축 및 분할 로직 개선: 전체를 MP3로 먼저 압축합니다.');
-        updateTranscriptionProgress(40, '🎵 MP3 압축 중...', '전체 오디오를 고품질 MP3로 변환하여 정확도를 높입니다.');
+        // 선택된 압축 방식에 따라 분기 (강제 폴백 제거)
+        const method = getSelectedCompressionMethod();
+        console.log(`🎵 선택된 압축 방식 적용: ${method}`);
+        updateTranscriptionProgress(40, '🎵 오디오 압축 중...', `${method} 방식으로 전체 오디오 압축`);
 
-        // FFmpeg를 사용하여 전체 오디오를 MP3로 압축
-        const compressedMp3Blob = await compressWithFFmpegWasm(resampledData, targetSampleRate);
-        const compressedSizeMB = compressedMp3Blob.size / (1024 / 1024);
+        let compressedBlob;
+        if (method === 'ffmpeg-wasm') {
+            // FFmpeg.wasm 사용 시 폴백 금지: 실패하면 예외를 던져 사용자에게 알림
+            compressedBlob = await compressWithFFmpegWasm(resampledData, targetSampleRate);
+        } else if (method === 'web-workers') {
+            compressedBlob = await compressWithWebWorkers(resampledData, targetSampleRate);
+        } else {
+            compressedBlob = await compressWithMediaRecorder(resampledData, targetSampleRate);
+        }
+        const compressedSizeMB = compressedBlob.size / (1024 / 1024);
         
         console.log(`✅ 전체 MP3 압축 완료: ${compressedSizeMB.toFixed(2)}MB`);
         updateTranscriptionProgress(60, '🗜️ 압축 완료', `전체 크기: ${compressedSizeMB.toFixed(2)}MB`);
@@ -274,7 +289,7 @@ async function extractAudioWithWebAPI(file) {
             console.log('✅ 파일 크기가 작아 분할이 필요 없습니다. 전체 파일을 사용합니다.');
             updateTranscriptionProgress(65, '✅ 분할 불필요', '정확도 최상으로 처리');
             return [{
-                blob: compressedMp3Blob,
+                blob: compressedBlob,
                 startTime: 0,
                 duration: audioBuffer.duration
             }];
@@ -283,7 +298,7 @@ async function extractAudioWithWebAPI(file) {
         // 압축 후에도 크기가 크면 스마트 분할 수행
         console.log(`⚠️ 압축 후에도 파일이 큽니다 (${compressedSizeMB.toFixed(2)}MB). 스마트 분할을 시작합니다.`);
         updateTranscriptionProgress(65, '⚠️ 파일 분할 중...', '크기가 커서 최소한으로 분할합니다.');
-        return await splitAudioBlob(compressedMp3Blob, audioBuffer.duration);
+        return await splitAudioBlob(compressedBlob, audioBuffer.duration);
         
     } catch (error) {
         console.error('오디오 추출 및 압축 중 오류 발생:', error);
@@ -552,9 +567,11 @@ async function compressWithFFmpegWasm(audioData, sampleRate) {
         updateTranscriptionProgress(45, '🎵 FFmpeg.wasm 초기화...', 'WebAssembly 엔진 시작');
 
         const coreBase = getFfmpegCoreBase();
-        const ffmpeg = FFmpeg.createFFmpeg({
-            log: false,
-            coreURL: await FFmpegUtil.toBlobURL(`${coreBase}ffmpeg-core.js`, 'application/javascript'),
+        const { createFFmpeg } = FFmpeg;
+        const ffmpeg = createFFmpeg({
+            log: true,
+            corePath: `${coreBase}ffmpeg-core.js`,
+            // 최신 @ffmpeg/ffmpeg는 corePath 사용, toBlobURL 없이도 동작
         });
 
         console.log('🔄 FFmpeg.wasm 로딩 시작...');
@@ -569,19 +586,21 @@ async function compressWithFFmpegWasm(audioData, sampleRate) {
         
         ffmpeg.FS('writeFile', 'input.wav', await FFmpegUtil.fetchFile(wavBlob));
 
+        // MP3 대신 FLAC로 압축해 STT 정확도 향상(용량은 커지나 분할 로직으로 보완)
         await ffmpeg.run(
             '-i', 'input.wav',
-            '-acodec', 'libmp3lame',
-            '-b:a', '128k',
+            '-vn',
+            '-ac', '1',
             '-ar', sampleRate.toString(),
-            'output.mp3'
+            '-acodec', 'flac',
+            'output.flac'
         );
 
-        const mp3Data = ffmpeg.FS('readFile', 'output.mp3');
-        const mp3Blob = new Blob([mp3Data.buffer], { type: 'audio/mp3' });
+        const outData = ffmpeg.FS('readFile', 'output.flac');
+        const mp3Blob = new Blob([outData.buffer], { type: 'audio/flac' });
 
         ffmpeg.FS('unlink', 'input.wav');
-        ffmpeg.FS('unlink', 'output.mp3');
+        ffmpeg.FS('unlink', 'output.flac');
 
         updateTranscriptionProgress(52, '🎵 FFmpeg.wasm 완료', '고품질 MP3 압축 성공');
         console.log('✅ FFmpeg.wasm 압축 성공');
@@ -590,12 +609,9 @@ async function compressWithFFmpegWasm(audioData, sampleRate) {
 
     } catch (error) {
         console.error('❌ FFmpeg.wasm 실패:', error);
-        console.log('📋 오류 상세:', error.message);
-        updateTranscriptionProgress(42, '⚠️ FFmpeg.wasm 실패', `${error.message} - MediaRecorder로 폴백`);
-
-        // 폴백: MediaRecorder 사용
-        console.log('🔄 MediaRecorder 폴백 시작...');
-        return await compressWithMediaRecorder(audioData, sampleRate);
+        updateTranscriptionProgress(100, '❌ FFmpeg.wasm 실패', error.message);
+        // 폴백하지 않고 예외를 던져 사용자가 방식 변경하도록 유도
+        throw error;
     }
 }
 

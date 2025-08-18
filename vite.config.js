@@ -59,6 +59,7 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
+    // ffmpeg.wasm는 최적화에서 제외해야 corePath 경로 로직이 안정적으로 작동
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', '@ffmpeg/core-mt']
   },
   resolve: {

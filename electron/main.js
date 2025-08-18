@@ -17,6 +17,7 @@ const rendererUrl = process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_REND
 
 // 개발 모드에서 Vite https 인증서 무시
 if (isDev) {
+  process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
   app.commandLine.appendSwitch('ignore-certificate-errors');
 }
 
@@ -29,6 +30,7 @@ app.commandLine.appendSwitch('disk-cache-dir', diskCacheDir);
 // 캐시/유저 데이터 경로 명시 설정으로 권한 이슈 완화
 const userDataDir = path.join(app.getPath('appData'), 'AutoShorts');
 app.setPath('userData', userDataDir);
+const keysStorePath = path.join(userDataDir, 'keys.json');
 
 function resolveRootPath(...segments) {
   return path.join(__dirname, '..', ...segments);
@@ -50,7 +52,7 @@ function toFileUrl(filePath) {
  * - enableRemoteModule: false
  */
 async function createWindow() {
-  const preload = path.join(__dirname, 'preload.js');
+  const preload = path.join(__dirname, 'preload.cjs');
 
   const win = new BrowserWindow({
     width: 1400,
@@ -221,6 +223,27 @@ ipcMain.handle('io:read-file-url', async (_event, absPath) => {
   // Only allow reading within user data or temp or project directory
   // For demo, allow absolute path but return file:// URL
   return pathToFileURL(absPath).toString();
+});
+
+// ---- Secure API key storage (cross-port persistent) ----
+ipcMain.handle('keys:load', async () => {
+  try {
+    if (fs.existsSync(keysStorePath)) {
+      const raw = await fs.promises.readFile(keysStorePath, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch {}
+  return {};
+});
+
+ipcMain.handle('keys:save', async (_event, data) => {
+  try {
+    await fs.promises.mkdir(path.dirname(keysStorePath), { recursive: true });
+    await fs.promises.writeFile(keysStorePath, JSON.stringify(data, null, 2), 'utf-8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 

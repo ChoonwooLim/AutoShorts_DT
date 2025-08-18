@@ -32,13 +32,33 @@ class ApiKeyManager {
         console.log('🔑 저장된 API 키 로드 시작...');
         console.log(`🌍 환경별 설정 적용: ${this.environment}`);
         
-        // 환경별 저장소 키 사용
+        // 1순위: Electron 보안 저장소 사용
+        try {
+            if (window.secureKeys) {
+                const storedKeys = await window.secureKeys.load();
+                if (storedKeys && Object.keys(storedKeys).length) {
+                    for (const provider of Object.keys(aiModels)) {
+                        if (storedKeys[provider]) {
+                            this.keys[provider] = storedKeys[provider];
+                            aiModels[provider].apiKey = storedKeys[provider];
+                        }
+                    }
+                    this.isInitialized = true;
+                    console.log('✅ Electron 보안 저장소에서 API 키 로드 완료');
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ 보안 저장소 로드 실패, localStorage로 폴백:', e.message);
+        }
+
+        // 폴백: 환경별 localStorage 키 사용
         const storageKey = this.environment === 'production' ? 'twinverse_apiKeys' : 'apiKeys';
-        console.log(`🔍 사용할 저장소 키: ${storageKey}`);
-        
+        console.log(`🔍 사용할 저장소 키(localStorage): ${storageKey}`);
+
         try {
             const storedKeys = JSON.parse(localStorage.getItem(storageKey)) || {};
-            console.log(`📦 저장된 키 데이터:`, storedKeys);
+            console.log(`📦 저장된 키 데이터(localStorage):`, storedKeys);
             
             for (const provider of Object.keys(aiModels)) {
                 if (storedKeys[provider]) {
@@ -59,7 +79,7 @@ class ApiKeyManager {
         }
     }
 
-    saveApiKey(provider, apiKey) {
+    async saveApiKey(provider, apiKey) {
         if (!provider || !apiKey) {
             const error = 'Provider 또는 API 키가 없습니다.';
             console.error(`❌ API 키 저장 실패: ${error}`);
@@ -72,17 +92,23 @@ class ApiKeyManager {
         this.keys[provider] = apiKey;
         aiModels[provider].apiKey = apiKey;
         
-        // 환경별 저장소 키 사용
+        // 1순위: Electron 보안 저장소 저장
+        try {
+            if (window.secureKeys) {
+                await window.secureKeys.save(this.keys);
+                console.log('✅ 보안 저장소에 API 키 저장됨');
+                return { success: true };
+            }
+        } catch (e) {
+            console.warn('⚠️ 보안 저장소 저장 실패, localStorage로 폴백:', e.message);
+        }
+
+        // 폴백: localStorage 저장
         const storageKey = this.environment === 'production' ? 'twinverse_apiKeys' : 'apiKeys';
-        console.log(`🔍 사용할 저장소 키: ${storageKey}`);
-        
         try {
             localStorage.setItem(storageKey, JSON.stringify(this.keys));
-            console.log(`✅ ${provider} API 키가 저장되었습니다. (${storageKey})`);
-            console.log(`📦 현재 저장된 모든 키:`, this.keys);
             return { success: true };
         } catch (error) {
-            console.error(`❌ localStorage 저장 실패:`, error);
             return { success: false, error: `저장 실패: ${error.message}` };
         }
     }

@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "cross-env NODE_ENV=development electron .",
-    "dev:electron": "concurrently -k \"vite\" \"cross-env NODE_ENV=development electron .\"",
+    "dev:electron": "concurrently -k \"vite --port 5174 --strictPort\" \"cross-env NODE_ENV=development ELECTRON_RENDERER_URL=https://localhost:5174 electron .\"",
     "build:app": "cross-env BUILD_TARGET=electron vite build",
     "electron:preview": "cross-env NODE_ENV=production electron .",
     "dist": "npm run build:app && cross-env NODE_ENV=production electron-builder -w"

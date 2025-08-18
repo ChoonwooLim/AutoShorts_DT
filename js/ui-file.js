@@ -102,6 +102,16 @@ async function handleFileSelect(file) {
             await window.loadFileModules();
             console.log('✅ File processing modules loaded successfully');
         }
+
+        // 자막 추출 버튼 활성화 및 안내 영역 표시
+        const startBtn = document.getElementById('startTranscriptionBtn');
+        const subtitleContainer = document.getElementById('subtitleContainer');
+        if (startBtn) {
+            startBtn.disabled = false;
+        }
+        if (subtitleContainer) {
+            subtitleContainer.style.display = 'block';
+        }
         
         // 플랫폼 카드가 선택되어 있지 않다면 첫 번째 카드를 자동 선택
         const platformCards = document.querySelectorAll('.platform-card');

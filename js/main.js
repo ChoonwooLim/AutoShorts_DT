@@ -33,6 +33,30 @@ window.loadFileModules = async function() {
     }
 };
 
+// Global function for loading and starting transcription modules
+window.loadTranscriptionModules = async function() {
+    try {
+        const transcriptionModule = await lazyLoader.loadModule('simple-transcription', () => import('./simple-transcription.js'));
+        if (transcriptionModule?.initializeTranscription) {
+            await transcriptionModule.initializeTranscription();
+        }
+        if (transcriptionModule?.setupSimpleTranscriptionEventListeners) {
+            transcriptionModule.setupSimpleTranscriptionEventListeners();
+        }
+        // Ensure button enabled and container visible
+        const btn = document.getElementById('startTranscriptionBtn');
+        const container = document.getElementById('subtitleContainer');
+        if (btn) btn.disabled = false;
+        if (container) container.style.display = 'block';
+        // Do not auto-start; wait for user click to avoid unexpected runs
+        return true;
+    } catch (error) {
+        console.error('❌ Failed to load transcription modules:', error);
+        alert('자막 모듈 로딩에 실패했습니다. 콘솔을 확인해주세요.');
+        return false;
+    }
+};
+
 /**
  * Initializes the web application.
  */
