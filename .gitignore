@@ -1,0 +1,71 @@
+# Dependencies
+/node_modules
+/dist
+/dist-app
+
+# Electron/electron-builder outputs
+/out/
+/build/
+/release/
+/dist/win-unpacked/
+/dist/*.nsis.7z
+/dist/*.blockmap
+/dist/*.yml
+*.7z
+*.zip
+*.exe
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Caches
+.cache/
+.parcel-cache/
+.eslintcache
+
+# Coverage/Reports
+coverage/
+reports/
+
+# Database
+twinverse.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# Service Account Keys
+# 서비스 계정 키와 같은 민감한 JSON 파일만 명시적으로 제외합니다.
+serviceAccountKey.json
+client_secret_*.json
+image-generator-config.json
+
+# 프로젝트 설정 파일은 제외하지 않습니다.
+!package.json
+!package-lock.json
+
+# 모델 파일은 추적합니다.
+!/public/models/**
+
+# MCP 개발용 서브폴더들 (Git 저장소가 포함될 수 있음)
+blender-mcp/
+unreal-analyzer-mcp/
+# (legacy) 잘못된 경로 정리됨

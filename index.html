@@ -1,0 +1,442 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VisionCut.AI</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/x-icon" href="image/AutoShortsIco.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500;600&family=Pacifico&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <script>
+        window.gapiLoaded = function() {
+            console.log('📦 Google API 로드됨');
+            if (window.handleGapiLoaded) {
+                window.handleGapiLoaded();
+            }
+        };
+        
+        window.gisLoaded = function() {
+            console.log('📦 Google Identity Services 로드됨');
+            if (window.handleGisLoaded) {
+                window.handleGisLoaded();
+            }
+        };
+    </script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+</head>
+<body>
+    <header class="main-header">
+        <div class="header-title-container">
+            <h1>VisionCut.AI</h1>
+            <span class="header-subtitle">A next-generation automation solution that completely revolutionizes video editing workflows through cutting-edge artificial intelligence technology</span>
+        </div>
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle-btn" aria-label="테마 전환">🌙</button>
+            <a href="../index.html" class="home-button">
+                <span class="home-text">TWINVERSE HOME</span>
+            </a>
+            <a href="../index.html" class="header-logo-link">
+                <img src="../image/TWV_Logo.png" alt="Twinverse 로고" class="header-logo" onerror="this.src='../image/TwinverseLogo.png'; this.onerror=function(){this.style.display='none'; this.nextElementSibling.style.display='flex';}">
+                <div class="header-logo-fallback" style="display: none;">
+                    <span class="logo-text">TW</span>
+                </div>
+            </a>
+        </div>
+    </header>
+    <div class="main-layout">
+        <div class="left-panel">
+            <div class="upload-section" id="uploadContainer">
+                <div class="upload-icon">📁</div>
+                <h3>영상 파일을 드래그하거나 클릭하여 업로드</h3>
+                <p>MP4, AVI, MOV 파일 지원</p>
+                <input type="file" id="file-input" class="file-input" accept="video/*">
+                <div class="file-info" id="fileInfo">
+                    <p id="fileName"></p>
+                    <p id="fileSize"></p>
+                </div>
+            </div>
+            <div class="new-video-section" id="newVideoSection" style="display: none;"></div>
+            <div class="video-preview-section" id="videoPreviewSection" style="display: none;">
+                <div class="video-main-container">
+                    <h3>📹&nbsp;원본 영상 미리보기</h3>
+                    <div class="video-container" id="originalVideoContainer">
+                        <video id="videoPreview" style="width: 100%;"></video>
+                    </div>
+                    <div class="video-progress-section">
+                        <div class="video-progress-bar" id="videoProgressBar" disabled>
+                            <div class="video-progress-fill" id="videoProgressFill"></div>
+                        </div>
+                        <div class="video-time-display" id="videoTimeDisplay">
+                            <span id="currentTime">0:00</span> / <span id="totalTime">0:00</span>
+                        </div>
+                    </div>
+                    <div class="video-controls">
+                        <button class="control-btn" id="skipToStartBtn" disabled>⏮️ 처음</button>
+                        <button class="control-btn" id="playBtn" disabled>▶️ 재생</button>
+                        <button class="control-btn" id="pauseBtn" disabled>⏸️ 일시정지</button>
+                        <button class="control-btn" id="stopBtn" disabled>⏹️ 정지</button>
+                        <button class="control-btn" id="rewindBtn" disabled>⏪ 되감기</button>
+                        <button class="control-btn" id="fastForwardBtn" disabled>⏩ 빨리감기</button>
+                        <button class="control-btn" id="skipToEndBtn" disabled>⏭️ 끝</button>
+                        <button id="loadNewVideoButton" class="control-btn">🔄️ 영상 불러오기</button>
+                        <select id="playbackSpeedSelect" class="setting-input" disabled style="width: auto; margin-left: 10px;">
+                            <option value="1">1x 배속</option>
+                            <option value="2">2x 배속</option>
+                            <option value="4">4x 배속</option>
+                            <option value="8">8x 배속</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="subtitle-control-panel">
+                    <div class="subtitle-header">
+                        <h3>🎙️ 자막 추출 설정</h3>
+                    </div>
+                    <div class="stt-model-selector">
+                        <label><input type="radio" name="stt-model" value="google" checked> Google</label>
+                        <label><input type="radio" name="stt-model" value="openai"> OpenAI</label>
+                    </div>
+                    <div class="compression-method-selector">
+                        <h4>🎵 압축 방식</h4>
+                        <div class="compression-options">
+                            <label><input type="radio" name="compression-method" value="mediarecorder" checked><span class="method-name">브라우저 압축</span><span class="method-desc">안정적, 호환성 좋음</span></label>
+                            <label><input type="radio" name="compression-method" value="ffmpeg-wasm"><span class="method-name">FFmpeg.wasm</span><span class="method-desc">고성능, 전문가용</span></label>
+                            <label><input type="radio" name="compression-method" value="web-workers"><span class="method-name">백그라운드 처리</span><span class="method-desc">UI 블로킹 없음</span></label>
+                        </div>
+                    </div>
+                     <div class="subtitle-controls">
+                        <button id="startTranscriptionBtn" class="action-btn" disabled onclick="loadTranscriptionModules()">🎙️ 자막 추출 시작</button>
+                        <div class="language-selector">
+                            <label for="sourceLang">언어:</label>
+                            <select id="sourceLang">
+                                <option value="ko-KR" selected>한국어</option>
+                                <option value="en-US">영어</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="transcription-progress" id="transcriptionProgress" style="display: none;">
+                        <div class="progress-bar"><div class="progress-fill" id="transcriptionProgressFill"></div></div>
+                        <div class="progress-text" id="transcriptionProgressText">자막 추출 준비 중...</div>
+                        <div class="progress-details" id="transcriptionProgressDetails"></div>
+                    </div>
+                    <div id="subtitleContainer" class="subtitle-container" style="display: none;">
+                        <div class="subtitle-placeholder">동영상 업로드 후 "자막 추출 시작" 버튼을 클릭하세요.</div>
+                    </div>
+                </div>
+            </div>
+            <div id="videoEditorContainer" style="display: none;"></div>
+            <div class="options-button-grid">
+                    <button class="option-button" id="videoProcessingBtn" data-category="video"><div class="option-icon">📼</div><div class="option-title">영상 처리</div><div class="option-count" id="videoCount">4개 선택됨</div></button>
+                    <button class="option-button" id="audioProcessingBtn" data-category="audio"><div class="option-icon">🔊</div><div class="option-title">오디오 처리</div><div class="option-count" id="audioCount">3개 선택됨</div></button>
+                    <button class="option-button" id="additionalFeaturesBtn" data-category="features"><div class="option-icon">📝</div><div class="option-title">추가 기능</div><div class="option-count" id="featuresCount">0개 선택됨</div></button>
+                    <button class="option-button" id="faceAnalysisBtn" data-category="face"><div class="option-icon">🎭</div><div class="option-title">배우얼굴분석</div><div class="option-count" id="faceCount">비활성화</div></button>
+                    <button class="option-button" id="shortsSettingsBtn" data-category="shorts"><div class="option-icon">⚙️</div><div class="option-title">숏츠 생성 설정</div><div class="option-count" id="shortsCount">기본 설정</div></button>
+                    <button class="option-button" id="storageManagementBtn" data-category="storage"><div class="option-icon">📁</div><div class="option-title">저장 관리</div><div class="option-count" id="storageCount">설정 필요</div></button>
+                    <button class="option-button" data-category="performance"><i class="fas fa-tachometer-alt option-icon"></i><span class="option-title">성능 및 캐시</span><span class="option-count" id="performanceCount">기본값</span></button>
+            </div>
+            
+            <div class="chat-area">
+                <div class="chat-list-panel">
+                    <div class="chat-list-header">
+                        <h3>대화 목록</h3>
+                        <input type="checkbox" id="selectAllChats" title="전체 선택">
+                    </div>
+                    <div class="chat-list" id="chatList"></div>
+                    <div class="chat-list-actions">
+                        <button id="saveChatsBtn" title="모든 대화 저장">💾 저장</button>
+                        <button id="loadChatsBtn" title="파일에서 불러오기">📂 불러오기</button>
+                        <input type="file" id="loadChatsInput" style="display: none;" accept=".json">
+                        <button id="deleteChatsBtn" title="선택 대화 삭제">🗑️ 삭제</button>
+                    </div>
+                </div>
+                <div class="chat-panel">
+                    <div class="chat-header">
+                        <h3>AI 어시스턴트</h3>
+                        <button id="newChatBtn">새 대화</button>
+                    </div>
+                    <div class="chat-history" id="chatHistory"></div>
+                </div>
+            </div>
+            <div class="selection-container">
+                <div class="dark-selection-box platform-box">
+                    <div class="platform-group">
+                        <div class="platform-card" data-platform="youtube_shorts">
+                            <div class="platform-icon">📺</div>
+                            YouTube Shorts
+                        </div>
+                        <div class="platform-card" data-platform="instagram_reels">
+                            <div class="platform-icon">📸</div>
+                            Instagram Reels
+                        </div>
+                        <div class="platform-card" data-platform="tiktok">
+                            <div class="platform-icon">🎵</div>
+                            TikTok
+                        </div>
+                        <div class="platform-card" data-platform="naver">
+                            <div class="platform-icon">KR</div>
+                            네이버
+                        </div>
+                        <div class="platform-card" data-platform="facebook_reels">
+                            <div class="platform-icon">👥</div>
+                            Facebook Reels
+                        </div>
+                    </div>
+                </div>
+                <div class="dark-selection-box ai-model-box">
+                    <div id="imagePreviewContainer" class="image-preview-container" style="display: none;">
+                        <div class="image-preview-header">
+                            <span>📷 업로드된 이미지</span>
+                            <button id="removeImageBtn" class="remove-image-btn">✕</button>
+                        </div>
+                        <div class="image-preview-wrapper">
+                            <img id="previewImage" alt="업로드된 이미지" />
+                            <div class="image-info">
+                                <span id="imageFileName">파일명</span>
+                                <span id="imageFileSize">크기</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <div class="input-wrapper">
+                            <textarea id="chatInput" placeholder="메시지 입력..." rows="1"></textarea>
+                            <div class="input-actions">
+                                <button id="imageUploadBtn" class="action-btn" title="이미지 업로드">📷</button>
+                                <button id="videoAnalysisBtn" class="action-btn" title="동영상 분석 요청">🎬</button>
+                                <button id="sendChatBtn" disabled>전송</button>
+                            </div>
+                        </div>
+                        <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                    </div>
+                    <div class="ai-model-container">
+                        <select id="mainModelSelect" class="setting-input"></select>
+                        <select id="subModelSelect" class="setting-input"></select>
+                        <button class="settings-btn" id="testAIBtn" title="AI 연결 테스트">🔬</button>
+                        <button class="settings-btn" id="apiSettingsBtn" title="API 키 설정">⚙️</button>
+                        <button class="settings-btn" id="googleConfigBtn" title="Google 설정">🔐</button>
+                        <button class="settings-btn" id="workLogBtn" title="작업 로그 보기">📝</button>
+                    </div>
+                </div>
+                <div class="dark-selection-box video-production-box">
+                    <div class="video-production-item">
+                        <div class="production-header">
+                            <button id="processShortsBtn" class="process-btn shorts-btn" disabled>
+                                📱 숏츠 제작실행
+                            </button>
+                            <select class="aspect-ratio-select" id="shortsAspectRatio">
+                                <option value="9:16" selected>9:16 (세로형)</option>
+                                <option value="1:1">1:1 (정사각형)</option>
+                                <option value="4:5">4:5 (인스타그램)</option>
+                                <option value="16:9">16:9 (가로형)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="video-production-item">
+                        <div class="production-header">
+                            <button id="processGeneralBtn" class="process-btn general-btn" disabled>
+                                🖥️ 일반영상 제작실행
+                            </button>
+                            <select class="aspect-ratio-select" id="generalAspectRatio">
+                                <option value="16:9" selected>16:9 (가로형)</option>
+                                <option value="21:9">21:9 (시네마)</option>
+                                <option value="4:3">4:3 (클래식)</option>
+                                <option value="9:16">9:16 (세로형)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- 배우 얼굴 갤러리 섹션 -->
+            <div class="face-gallery-container" id="faceGalleryContainer" style="display: block;">
+                <h3>🎭 배우 얼굴 갤러리</h3>
+                <div class="face-gallery-controls" id="faceGalleryMergeControls" style="display: none;">
+                    <button id="mergeFacesMainBtn" class="control-btn" disabled>🔄 동일인 병합</button>
+                    <p id="selectionCounterMain" class="selection-counter" aria-live="polite">0명 선택됨</p>
+                </div>
+                <div class="analysis-progress" id="analysisProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="faceProgressFill"></div>
+                    </div>
+                    <div class="progress-text" id="faceProgressText">얼굴 분석 중...</div>
+                </div>
+                <div class="face-results" id="faceResults">
+                    <!-- 분석된 얼굴들이 여기에 표시됩니다 -->
+                </div>
+            </div>
+
+            <!-- 💡 수정: 얼굴 분석 v2 컨테이너 구조 개선 -->
+            <div id="faceAnalysisV2Container" class="face-gallery-container" style="display: none;">
+                <h3>🎭 전문가 얼굴 분석</h3>
+                <div id="faceAnalysisProgressContainer" class="analysis-progress" style="display: none;">
+                    <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <div id="faceAnalysisProgressBar" class="progress-fill"></div>
+                    </div>
+                    <p id="faceAnalysisProgressText" class="progress-text">분석 준비 중...</p>
+                </div>
+                <!-- 💡 수정: 병합 및 관리 기능 추가 -->
+                <div id="faceAnalysisControls" class="face-gallery-controls" style="display: none;">
+                    <button id="mergeFacesBtn" class="control-btn" disabled>🔄 선택 인물 병합</button>
+                    <p id="selectionCounter" class="selection-counter" aria-live="polite">0명 선택됨</p>
+                </div>
+                <div id="faceAnalysisResults" class="face-card-grid">
+                    <!-- 분석 결과 카드가 여기에 동적으로 추가됩니다 -->
+                </div>
+            </div>
+        </div>
+        <div class="right-panel">
+            <div id="resultsContainer">
+                <div class="results-upper-section">
+                    <div class="title-box"><h3>✅ 완성된 숏츠 영상</h3></div>
+                    <div class="shorts-carousel">
+                        <button class="carousel-btn prev" id="prevShortBtn">‹</button>
+                        <div class="shorts-viewport"><div id="shortsTrack"></div></div>
+                        <button class="carousel-btn next" id="nextShortBtn">›</button>
+                    </div>
+                    <div id="shorts-counter"></div>
+                    <div id="completedShortsGrid" style="display: none;"></div>
+                </div>
+                <div class="results-lower-section">
+                    <div class="subtitle-results-header">
+                        <h3>📝 추출된 자막</h3>
+                        <div class="subtitle-actions">
+                            <button id="copySubtitleBtn" class="subtitle-action-btn" title="자막 복사">📋</button>
+                            <button id="downloadSubtitleBtn" class="subtitle-action-btn" title="자막 다운로드">💾</button>
+                            <button id="clearSubtitleBtn" class="subtitle-action-btn" title="자막 지우기">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="subtitle-results-container" id="subtitleResultsContainer">
+                        <div class="subtitle-placeholder-results"><div class="placeholder-icon">🎙️</div><p>영상을 업로드하고 자막 추출을 시작하세요</p><span>추출된 자막이 여기에 표시됩니다</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API Key Modal -->
+    <div id="apiKeyModal" class="api-key-modal">
+        <div class="modal-content">
+            <span class="close-button" id="closeApiKeyModalBtn">&times;</span>
+            <h3 id="apiKeyModalTitle">API 키 설정</h3>
+            <div class="form-group">
+                <div class="form-label-group">
+                    <label for="apiKeyInput">API 키</label>
+                    <a href="#" id="apiKeyLink" target="_blank" rel="noopener noreferrer">API 키 발급받기 &nearr;</a>
+                </div>
+                <input type="password" id="apiKeyInput" class="form-group-input">
+            </div>
+            <div class="modal-actions">
+                <button id="cancelApiKeyBtn" class="btn btn-secondary">취소</button>
+                <button id="saveApiKeyBtn" class="btn btn-primary">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Google Config Modal -->
+    <div id="googleConfigModal" class="api-key-modal">
+        <div class="modal-content">
+            <span class="close-button" id="closeGoogleConfigModalBtn">&times;</span>
+            <h3>🔐 Google 인증 설정</h3>
+            <div class="form-group">
+                <div class="form-label-group">
+                    <label for="googleClientIdInput">Google Client ID</label>
+                    <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Google Cloud Console &nearr;</a>
+                </div>
+                <input type="text" id="googleClientIdInput" class="form-group-input" placeholder="your-project-id.apps.googleusercontent.com">
+                <div class="google-config-info">
+                    <p id="currentGoogleConfigInfo" style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;"></p>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="resetGoogleConfigBtn" class="btn btn-secondary">기본값 사용</button>
+                <button id="cancelGoogleConfigBtn" class="btn btn-secondary">취소</button>
+                <button id="saveGoogleConfigBtn" class="btn btn-primary">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Modal -->
+    <div id="imageModal" class="image-modal">
+        <span class="image-modal-close" onclick="closeImageModal()">&times;</span>
+        <img id="imageModalContent" class="image-modal-content">
+    </div>
+
+    <!-- 작업 로그 모달 -->
+    <div id="workLogModal" class="option-modal">
+        <div class="modal-content work-log-modal">
+            <div class="modal-header">
+                <h3>📝 작업 로그</h3>
+                <button class="modal-close" data-modal="workLogModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- 작업 로그 통계 -->
+                <div class="work-log-stats">
+                    <div class="stat-item">
+                        <div class="stat-number" id="totalWorkCount">0</div>
+                        <div class="stat-label">전체 작업</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="todayWorkCount">0</div>
+                        <div class="stat-label">오늘 작업</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="activeDaysCount">0</div>
+                        <div class="stat-label">활동 일수</div>
+                    </div>
+                </div>
+
+                <!-- 날짜 필터 -->
+                <div class="work-log-filters">
+                    <div class="filter-group">
+                        <label for="workLogDateFilter">날짜 필터:</label>
+                        <select id="workLogDateFilter" class="modal-setting-input">
+                            <option value="all">전체</option>
+                            <option value="today">오늘</option>
+                            <option value="yesterday">어제</option>
+                            <option value="this-week">이번 주</option>
+                            <option value="this-month">이번 달</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="workLogTypeFilter">작업 유형:</label>
+                        <select id="workLogTypeFilter" class="modal-setting-input">
+                            <option value="all">전체</option>
+                            <option value="upload">파일 업로드</option>
+                            <option value="transcription">자막 추출</option>
+                            <option value="processing">영상 처리</option>
+                            <option value="chat">AI 대화</option>
+                            <option value="settings">설정 변경</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 작업 로그 목록 -->
+                <div class="work-log-list" id="workLogList">
+                    <div class="work-log-empty">
+                        <div class="empty-icon">📋</div>
+                        <div class="empty-text">아직 작업 로그가 없습니다.</div>
+                        <div class="empty-desc">AutoShorts를 사용하면 자동으로 작업 기록이 생성됩니다.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn secondary" onclick="exportWorkLogs()">📤 내보내기</button>
+                <button class="modal-btn danger" onclick="clearWorkLogs()">🗑️ 전체 삭제</button>
+                <button class="modal-btn primary" data-modal="workLogModal">닫기</button>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="js/utils/event-manager.js"></script>
+    <script type="module" src="js/utils/memory-manager.js"></script>
+    <script type="module" src="js/utils/lazy-loader.js"></script>
+    <script type="module" src="js/utils/performance-monitor.js"></script>
+    <script type="module" src="js/ui-options-modal.js"></script>
+    <script type="module" src="js/ui-theme.js"></script>
+    <script type="module" src="js/ui-file.js"></script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
