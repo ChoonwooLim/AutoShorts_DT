@@ -15,6 +15,13 @@ if (isDev) {
   app.commandLine.appendSwitch('ignore-certificate-errors');
 }
 
+// SharedArrayBuffer 활성화를 위한 플래그 추가 (보완)
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
+
+// 캐시/유저 데이터 경로 명시 설정으로 권한 이슈 완화
+const userDataDir = path.join(app.getPath('appData'), 'AutoShorts');
+app.setPath('userData', userDataDir);
+
 function resolveRootPath(...segments) {
   return path.join(__dirname, '..', ...segments);
 }
@@ -58,8 +65,9 @@ async function createWindow() {
   // dist가 있으면 우선 서빙, 없으면 프로젝트 루트 서빙
   const serveRoot = fs.existsSync(resolveDistAppPath('index.html')) ? resolveDistAppPath() : resolveRootPath();
 
-  if (isDev && rendererUrl) {
-    await win.loadURL(rendererUrl);
+  if (isDev) {
+    const url = rendererUrl || 'https://localhost:5173/index.html';
+    await win.loadURL(url);
   } else {
     // 모든 환경에서 로컬 HTTP 서버로 정적 자산 제공
     const port = await getPort({ port: [5123, 5124, 5125, 0] });
@@ -69,6 +77,11 @@ async function createWindow() {
         cleanUrls: true,
         directoryListing: false,
         headers: [
+          { source: '**/*', headers: [
+            { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+            { key: 'Cross-Origin-Embedder-Policy', value: 'require-corp' },
+            { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' }
+          ] },
           { source: '**/*.js', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
           { source: '**/*.css', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
           { source: '**/*.wasm', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] }

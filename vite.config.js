@@ -22,7 +22,13 @@ export default defineConfig({
     port: 5173,
     https: true,
     host: true,
-    cors: true
+    cors: true,
+    strictPort: true,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Resource-Policy': 'same-origin'
+    }
   },
   base: process.env.BUILD_TARGET === 'electron'
     ? './'
@@ -30,6 +36,11 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
+    target: 'es2020',
+    sourcemap: false,
+    minify: 'esbuild',
+    cssCodeSplit: true,
+    chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
         manualChunks: {
@@ -46,6 +57,9 @@ export default defineConfig({
         inlineDynamicImports: true
       }
     }
+  },
+  optimizeDeps: {
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', '@ffmpeg/core-mt']
   },
   resolve: {
     alias: {
