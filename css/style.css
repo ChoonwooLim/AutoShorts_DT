@@ -4939,7 +4939,7 @@
         }
 
         .video-controls select {
-            background-color: var(--background-color);
+            background-color: var(--panel-bg);
             color: var(--text-color);
             border: 1px solid var(--border-color);
             border-radius: 8px;
@@ -4951,6 +4951,38 @@
             min-width: 100px;
             height: auto;
             flex-shrink: 0;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        /* Ensure playback speed select text is clearly visible (white), even when disabled */
+        #playbackSpeedSelect,
+        .video-controls select {
+            color: #fff !important;
+        }
+
+        #playbackSpeedSelect:disabled,
+        .video-controls select:disabled {
+            color: #fff !important;
+            opacity: 1 !important; /* override default disabled dimming */
+            -webkit-text-fill-color: #fff !important; /* improve visibility in WebKit */
+        }
+
+        /* Optional: dropdown options contrast on dark themes */
+        .video-controls select option {
+            background-color: var(--panel-bg);
+            color: #fff;
+        }
+
+        /* Explicit dark-mode overrides */
+        body.dark-mode .video-controls select {
+            background-color: var(--panel-bg) !important;
+            color: #fff !important;
+            border-color: var(--border-color) !important;
+        }
+        body.dark-mode .video-controls select option {
+            background-color: var(--panel-bg) !important;
+            color: #fff !important;
         }
 
         .video-main-container {
