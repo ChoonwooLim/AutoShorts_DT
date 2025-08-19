@@ -93,6 +93,20 @@ async function main() {
         // Background preloading
         lazyLoader.startPreloading();
         
+        // 고급 자막 추출 버튼 이벤트 리스너 설정
+        const advancedTranscriptionBtn = document.getElementById('openAdvancedTranscription');
+        if (advancedTranscriptionBtn) {
+            advancedTranscriptionBtn.addEventListener('click', () => {
+                console.log('🚀 고급 자막 추출 버튼 클릭됨');
+                if (window.openTranscriptionModal) {
+                    window.openTranscriptionModal(state.uploadedFile);
+                } else {
+                    console.error('❌ openTranscriptionModal 함수를 찾을 수 없습니다.');
+                }
+            });
+            console.log('🎙️ Advanced transcription button initialized.');
+        }
+        
         // 배우 얼굴 분석 버튼 이벤트 리스너 설정
         const faceAnalysisBtn = document.getElementById('faceAnalysisBtn');
         if (faceAnalysisBtn) {

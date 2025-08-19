@@ -3,6 +3,7 @@
 /dist
 /dist-app
 /AutoShortsDeskTop
+/C_Image
 
 # Electron/electron-builder outputs
 /out/

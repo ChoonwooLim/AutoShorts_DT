@@ -216,6 +216,17 @@ export const aiModels = {
         apiKey: '',
         apiKeyUrl: 'https://platform.deepseek.com/api-keys',
         endpoint: 'https://api.deepseek.com/v1/chat/completions'
+    },
+    assemblyai: {
+        name: 'AssemblyAI',
+        subModels: [
+            "Speech-to-Text",
+            "Speaker Diarization",
+            "Sentiment Analysis"
+        ],
+        apiKey: '',
+        apiKeyUrl: 'https://www.assemblyai.com/app/account',
+        endpoint: 'https://api.assemblyai.com/v2'
     }
 };
 

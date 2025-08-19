@@ -64,10 +64,22 @@ function showUploadedFile(file) {
         DOM.fileInfo.style.display = 'block';
         DOM.uploadContainer.style.display = 'none';
         DOM.videoPreviewSection.style.display = 'flex';
+        
+        // 자막 컨트롤 패널 표시
+        const subtitlePanel = document.querySelector('.subtitle-control-panel');
+        if (subtitlePanel) {
+            subtitlePanel.style.display = 'block';
+        }
     } else {
         DOM.fileInfo.style.display = 'none';
         DOM.uploadContainer.style.display = 'flex';
         DOM.videoPreviewSection.style.display = 'none';
+        
+        // 자막 컨트롤 패널 숨기기
+        const subtitlePanel = document.querySelector('.subtitle-control-panel');
+        if (subtitlePanel) {
+            subtitlePanel.style.display = 'none';
+        }
     }
 }
 
