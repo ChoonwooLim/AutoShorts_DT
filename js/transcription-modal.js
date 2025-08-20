@@ -864,6 +864,118 @@ class TranscriptionModal {
         }
     }
 
+    async transcribeWithWhisperSegments(audioData) {
+        // 대용량 오디오 파일을 여러 세그먼트로 분할하여 처리
+        const maxSize = 24 * 1024 * 1024; // 24MB
+        const totalSize = audioData.size;
+        const segmentCount = Math.ceil(totalSize / maxSize);
+        const allSegments = [];
+        let lastEndTime = 0;
+        
+        console.log(`📊 총 ${segmentCount}개 세그먼트로 분할 처리`);
+        
+        for (let i = 0; i < segmentCount; i++) {
+            const start = i * maxSize;
+            const end = Math.min(start + maxSize, totalSize);
+            const segmentBlob = audioData.slice(start, end);
+            const segmentNum = i + 1;
+            
+            this.updateProgress(
+                30 + (40 * i / segmentCount), 
+                `세그먼트 ${segmentNum}/${segmentCount} 처리 중...`,
+                `각 세그먼트를 순차적으로 처리합니다.`
+            );
+            
+            console.log(`🎙️ 세그먼트 ${segmentNum}/${segmentCount} 처리 중...`);
+            
+            const formData = new FormData();
+            formData.append('file', segmentBlob, `audio_segment_${i}.mp3`);
+            formData.append('model', 'whisper-1');
+            
+            const language = document.getElementById('whisperLanguage').value;
+            if (language !== 'auto') {
+                formData.append('language', language);
+            }
+            
+            // 타임스탬프 요청
+            if (document.getElementById('whisperTimestamps').checked) {
+                formData.append('response_format', 'verbose_json');
+                formData.append('timestamp_granularities', 'segment');
+            }
+            
+            // 프롬프트에 이전 컨텍스트 포함
+            const lastText = allSegments.length > 0 ? 
+                allSegments[allSegments.length - 1].text?.slice(-200) : '';
+            formData.append('prompt', `이전 내용: ${lastText}\n이 오디오를 정확하게 전사해주세요.`);
+            
+            try {
+                // 프록시 URL 설정
+                let proxyUrl;
+                if (window.env && window.env.isElectron) {
+                    const proxyPort = window.electronAPI && window.electronAPI.getProxyPort 
+                        ? await window.electronAPI.getProxyPort() 
+                        : 3003;
+                    proxyUrl = `http://localhost:${proxyPort}/api`;
+                } else if (window.location.hostname === 'localhost') {
+                    proxyUrl = 'http://localhost:3001/api';
+                } else {
+                    proxyUrl = '/api';
+                }
+                
+                const response = await fetch(`${proxyUrl}/openai/transcriptions`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${await this.getApiKey('openai')}`
+                    },
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    console.error(`❌ 세그먼트 ${segmentNum} 처리 실패`);
+                    continue;
+                }
+                
+                const result = await response.json();
+                
+                // 세그먼트 타임스탬프 조정
+                if (result.segments) {
+                    const estimatedDuration = (audioData.size / totalSize) * 1200; // 전체 예상 시간 (초)
+                    const segmentDuration = estimatedDuration / segmentCount;
+                    const timeOffset = i * segmentDuration;
+                    
+                    result.segments = result.segments.map(seg => ({
+                        ...seg,
+                        start: (seg.start || 0) + timeOffset,
+                        end: (seg.end || 0) + timeOffset
+                    }));
+                    
+                    allSegments.push(...result.segments);
+                    lastEndTime = result.segments[result.segments.length - 1]?.end || lastEndTime;
+                } else {
+                    // 단순 텍스트인 경우
+                    allSegments.push({
+                        text: result.text || result,
+                        start: lastEndTime,
+                        end: lastEndTime + 60
+                    });
+                    lastEndTime += 60;
+                }
+                
+            } catch (error) {
+                console.error(`❌ 세그먼트 ${segmentNum} 처리 중 오류:`, error);
+            }
+        }
+        
+        // 모든 세그먼트 병합
+        const mergedResult = {
+            text: allSegments.map(s => s.text).join(' '),
+            segments: allSegments
+        };
+        
+        console.log(`✅ 총 ${allSegments.length}개 세그먼트 처리 완료`);
+        return mergedResult;
+    }
+
     async extractAudio(file) {
         console.log('🎵 오디오 추출 시작...');
         
@@ -1043,28 +1155,30 @@ class TranscriptionModal {
         console.log('🎬 비디오 파일을 직접 전송합니다...');
         this.updateProgress(15, '파일 준비 중...', '비디오 파일을 처리 중입니다.');
         
-        // 파일 크기 확인 (25MB 제한)
-        const maxSize = 25 * 1024 * 1024; // 25MB
-        if (file.size > maxSize) {
-            // 파일이 너무 큰 경우 경고
-            console.warn(`⚠️ 파일 크기가 ${(file.size / 1024 / 1024).toFixed(2)}MB로 너무 큽니다.`);
-            
-            // MP3 압축 정보 표시
-            const estimatedMP3Size = (file.size * 0.01); // 대략 1% 크기로 압축 예상
-            console.log(`💡 MP3 압축 시 예상 크기: ${(estimatedMP3Size / 1024 / 1024).toFixed(2)}MB`);
-            console.log(`📊 압축 설정: 16kHz, 모노, 32kbps - 음성 인식에 최적화`);
-            
-            // 비디오의 처음 부분만 추출 시도
-            const slice = file.slice(0, maxSize);
-            return new Blob([slice], { type: file.type });
-        }
+        // 파일 크기 정보 표시
+        const fileSizeMB = file.size / (1024 * 1024);
+        console.log(`📁 원본 파일 크기: ${fileSizeMB.toFixed(2)}MB`);
         
-        // 파일 그대로 반환 (OpenAI API가 비디오도 처리 가능)
+        // MP3 압축 정보 표시  
+        const estimatedMP3Size = (file.size * 0.01); // 대략 1% 크기로 압축 예상
+        console.log(`💡 MP3 압축 후 예상 크기: ${(estimatedMP3Size / 1024 / 1024).toFixed(2)}MB`);
+        console.log(`📊 압축 설정: 16kHz, 모노, 32kbps - 음성 인식에 최적화`);
+        
+        // 파일 그대로 반환 (오디오 추출은 FFmpeg가 처리)
         return file;
     }
 
     async transcribeWithWhisper(audioData) {
         this.updateProgress(30, 'OpenAI Whisper로 음성 인식 중...', '고정밀 AI 모델로 처리 중입니다.');
+
+        // 파일 크기 확인 및 분할 처리
+        const maxSize = 24 * 1024 * 1024; // 24MB (API 제한보다 약간 작게)
+        const audioSize = audioData.size;
+        
+        if (audioSize > maxSize) {
+            console.log(`🔄 큰 파일 감지 (${(audioSize / 1024 / 1024).toFixed(2)}MB) - 분할 처리 중...`);
+            return await this.transcribeWithWhisperSegments(audioData);
+        }
 
         const formData = new FormData();
         formData.append('file', audioData, 'audio.webm');

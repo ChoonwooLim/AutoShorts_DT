@@ -492,7 +492,7 @@ ipcMain.handle('audio:extract-from-path', async (_event, { filePath, fileName, q
         '-ac', '1',  // 모노
         '-b:a', '96k',  // 96kbps
         '-q:a', '2',
-        '-t', '1200',  // 최대 20분
+        // 시간 제한 제거 - 전체 비디오 처리
         outputPath
       ];
       console.log('🏆 하이엔드 품질로 오디오 추출');
@@ -506,7 +506,7 @@ ipcMain.handle('audio:extract-from-path', async (_event, { filePath, fileName, q
         '-ac', '1',
         '-b:a', '64k',
         '-q:a', '4',
-        '-t', '1200',
+        // 시간 제한 제거
         outputPath
       ];
       console.log('⚖️ 표준 품질로 오디오 추출');
@@ -520,7 +520,7 @@ ipcMain.handle('audio:extract-from-path', async (_event, { filePath, fileName, q
         '-ac', '1',
         '-b:a', '32k',
         '-q:a', '7',
-        '-t', '1200',
+        // 시간 제한 제거
         outputPath
       ];
       console.log('⚡ 경량 품질로 오디오 추출');
@@ -600,7 +600,7 @@ ipcMain.handle('audio:extract', async (_event, { videoData, fileName, quality = 
         '-ac', '1',  // 모노
         '-b:a', '96k',  // 96kbps
         '-q:a', '2',  // 고품질
-        '-t', '1200',  // 최대 20분
+        // 시간 제한 제거
         outputPath
       ];
       console.log('🏆 하이엔드 품질로 오디오 추출 (96kbps, 24kHz)');
@@ -615,7 +615,7 @@ ipcMain.handle('audio:extract', async (_event, { videoData, fileName, quality = 
         '-ac', '1',
         '-b:a', '64k',  // 64kbps
         '-q:a', '4',  // 표준 품질
-        '-t', '1200',
+        // 시간 제한 제거
         outputPath
       ];
       console.log('⚖️ 표준 품질로 오디오 추출 (64kbps, 16kHz)');
@@ -630,7 +630,7 @@ ipcMain.handle('audio:extract', async (_event, { videoData, fileName, quality = 
         '-ac', '1',
         '-b:a', '32k',  // 32kbps
         '-q:a', '7',  // 낮은 품질
-        '-t', '1200',
+        // 시간 제한 제거
         outputPath
       ];
       console.log('⚡ 경량 품질로 오디오 추출 (32kbps, 16kHz)');

@@ -132,6 +132,33 @@ async function main() {
                         </div>
                     `;
                 }
+
+                // ✅ 자동으로 자막 편집 모달 열기
+                try {
+                    const fullResult = event.detail.fullResult;
+                    let segments = [];
+                    if (fullResult && Array.isArray(fullResult.segments) && fullResult.segments.length > 0) {
+                        segments = fullResult.segments.map(s => ({
+                            start: Math.max(0, Math.round(Number(s.start)||0)),
+                            end: Math.max(0, Math.round(Number(s.end)||0)),
+                            text: String(s.text||'').trim()
+                        }));
+                    }
+
+                    if (segments.length > 0) {
+                        // 전역 상태에도 반영
+                        state.subtitles = segments;
+                    }
+
+                    if (window.subtitleEditorModal && typeof window.subtitleEditorModal.open === 'function') {
+                        window.subtitleEditorModal.open(segments.length ? segments : undefined);
+                    } else {
+                        // 늦게 로드되는 경우를 대비한 폴백 이벤트
+                        document.dispatchEvent(new CustomEvent('openSubtitleEditorRequested'));
+                    }
+                } catch (e) {
+                    console.warn('자막 편집 모달 자동 오픈 실패:', e);
+                }
             }
         });
         

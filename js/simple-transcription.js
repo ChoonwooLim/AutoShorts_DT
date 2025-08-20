@@ -1435,6 +1435,18 @@ function addSubtitleEntryWithTimestamp(segments, source) {
 
     // 자막 생성 완료 이벤트 호출
     onSubtitleGenerated(segments.map(s => s.text).join('\n'));
+
+    // ✅ 자막 추출 종료 시 자동 편집 모달 오픈 (하이엔드 앱 UX)
+    try {
+        if (window.subtitleEditorModal && typeof window.subtitleEditorModal.open === 'function') {
+            window.subtitleEditorModal.open(state.subtitles);
+        } else if (window.require) {
+            // 모듈이 지연 로드된 경우를 대비하여 DOM 이벤트로 신호
+            document.dispatchEvent(new CustomEvent('openSubtitleEditorRequested'));
+        }
+    } catch (e) {
+        console.warn('자막 편집 모달 자동 오픈 실패:', e);
+    }
 }
 // 외부에서 import할 수 있도록 내보내기 (project-manager 등)
 export { addSubtitleEntryWithTimestamp };
