@@ -409,13 +409,41 @@ ipcMain.handle('app:get-proxy-port', async () => {
   return global.proxyPort || 3003;
 });
 
-// --- File Management ---
-ipcMain.handle('file:save-to-temp', async (_event, { fileName, data, isBase64 }) => {
+// --- Save Binary File ---
+ipcMain.handle('file:save-binary', async (_event, { fileName, buffer }) => {
   try {
     const tempDir = app.getPath('temp');
     const timestamp = Date.now();
     const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
     const tempPath = path.join(tempDir, `temp_${timestamp}_${safeName}`);
+    
+    // ArrayBuffer를 Buffer로 변환하여 저장
+    const nodeBuffer = Buffer.from(buffer);
+    fs.writeFileSync(tempPath, nodeBuffer);
+    
+    console.log(`📁 바이너리 파일 저장: ${tempPath} (${(nodeBuffer.length / 1024 / 1024).toFixed(2)}MB)`);
+    return tempPath;
+  } catch (error) {
+    console.error('❌ 바이너리 파일 저장 실패:', error);
+    return null;
+  }
+});
+
+// --- File Management ---
+ipcMain.handle('file:save-to-temp', async (_event, { fileName, data, isBase64, append, tempPath: existingPath }) => {
+  try {
+    let tempPath;
+    
+    if (append && existingPath) {
+      // 기존 파일에 추가
+      tempPath = existingPath;
+    } else {
+      // 새 파일 생성
+      const tempDir = app.getPath('temp');
+      const timestamp = Date.now();
+      const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+      tempPath = path.join(tempDir, `temp_${timestamp}_${safeName}`);
+    }
     
     let buffer;
     if (isBase64) {
@@ -426,9 +454,17 @@ ipcMain.handle('file:save-to-temp', async (_event, { fileName, data, isBase64 })
       buffer = Buffer.from(data);
     }
     
-    fs.writeFileSync(tempPath, buffer);
+    if (append && existingPath) {
+      // 파일에 추가
+      fs.appendFileSync(tempPath, buffer);
+      const stats = fs.statSync(tempPath);
+      console.log(`📝 파일에 추가: ${(buffer.length / 1024 / 1024).toFixed(2)}MB (총: ${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+    } else {
+      // 새 파일 작성
+      fs.writeFileSync(tempPath, buffer);
+      console.log(`📁 임시 파일 생성: ${tempPath} (${(buffer.length / 1024 / 1024).toFixed(2)}MB)`);
+    }
     
-    console.log(`📁 임시 파일 저장: ${tempPath} (${(buffer.length / 1024 / 1024).toFixed(2)}MB)`);
     return tempPath;
   } catch (error) {
     console.error('❌ 임시 파일 저장 실패:', error);

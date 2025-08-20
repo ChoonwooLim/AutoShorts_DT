@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   extractAudio: (params) => ipcRenderer.invoke('audio:extract', params),
   extractAudioFromPath: (params) => ipcRenderer.invoke('audio:extract-from-path', params),
   saveToTemp: (params) => ipcRenderer.invoke('file:save-to-temp', params),
+  saveBinaryFile: (params) => ipcRenderer.invoke('file:save-binary', params),
   getProxyPort: () => ipcRenderer.invoke('app:get-proxy-port')
 });
 

@@ -107,6 +107,34 @@ async function main() {
             console.log('🎙️ Advanced transcription button initialized.');
         }
         
+        // 자막 추출 완료 이벤트 리스너 추가
+        window.addEventListener('subtitleExtracted', (event) => {
+            console.log('📝 자막 추출 완료 이벤트 수신');
+            
+            if (event.detail) {
+                const { text, method } = event.detail;
+                
+                // 자막 결과 섹션 표시
+                const resultsSection = document.querySelector('.results-lower-section');
+                if (resultsSection) {
+                    resultsSection.style.display = 'block';
+                }
+                
+                // 자막 컨테이너에 표시
+                const container = document.getElementById('subtitleResultsContainer');
+                if (container && text) {
+                    container.innerHTML = `
+                        <div style="padding: 15px;">
+                            <div style="color: #4CAF50; margin-bottom: 10px;">
+                                ✅ ${method} 자막 추출 완료
+                            </div>
+                            <pre style="white-space: pre-wrap;">${text}</pre>
+                        </div>
+                    `;
+                }
+            }
+        });
+        
         // 배우 얼굴 분석 버튼 이벤트 리스너 설정
         const faceAnalysisBtn = document.getElementById('faceAnalysisBtn');
         if (faceAnalysisBtn) {

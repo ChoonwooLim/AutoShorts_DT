@@ -15,6 +15,8 @@ class TranscriptionModal {
         this.audioContext = null;
         // API 키는 기존 apiKeyManager를 통해 관리 - 초기화 대기
         this.apiKeyManager = null;
+        // 자동 닫기 옵션 (기본값: true)
+        this.autoCloseOnComplete = true;
     }
 
     init() {
@@ -880,44 +882,57 @@ class TranscriptionModal {
                 // 파일 크기에 따라 다른 처리 방식 사용
                 
                 if (file.size > 10 * 1024 * 1024) {
-                    // 10MB 이상: 파일 경로 직접 전달 (네이티브 FFmpeg에서 처리)
-                    console.log('🔧 대용량 파일 - 파일 경로 직접 전달 방식 사용');
-                    console.log('📁 임시 파일로 저장 중...');
+                    // 10MB 이상: File 객체의 path 속성 직접 사용 (Electron 환경)
+                    console.log('🔧 대용량 파일 - 파일 경로 직접 사용');
                     
-                    // File 객체를 ArrayBuffer로 읽기
-                    const arrayBuffer = await file.arrayBuffer();
-                    const uint8Array = new Uint8Array(arrayBuffer);
+                    // Electron 환경에서 File 객체는 path 속성을 가질 수 있음
+                    let filePath = null;
                     
-                    // Base64로 변환 (청크 단위)
-                    let base64 = '';
-                    const chunkSize = 1024 * 1024; // 1MB 청크
-                    for (let i = 0; i < uint8Array.length; i += chunkSize) {
-                        const chunk = uint8Array.slice(i, i + chunkSize);
-                        // btoa를 안전하게 사용
-                        const chunkArray = Array.from(chunk);
-                        const chunkString = chunkArray.map(byte => String.fromCharCode(byte)).join('');
-                        base64 += btoa(chunkString);
+                    // 방법 1: File 객체의 path 속성 확인
+                    if (file.path) {
+                        filePath = file.path;
+                        console.log('📍 File.path 사용:', filePath);
+                    } 
+                    // 방법 2: webkitRelativePath 확인
+                    else if (file.webkitRelativePath) {
+                        filePath = file.webkitRelativePath;
+                        console.log('📍 webkitRelativePath 사용:', filePath);
+                    }
+                    // 방법 3: Blob URL 생성 후 처리
+                    else {
+                        console.log('📁 Blob으로 임시 파일 생성 중...');
                         
-                        // 진행률 표시
-                        if (i % (10 * 1024 * 1024) === 0) {
-                            const progress = Math.min(20 + (i / uint8Array.length) * 10, 30);
-                            this.updateProgress(progress, '파일 준비 중...', `${((i / uint8Array.length) * 100).toFixed(0)}% 완료`);
+                        // Blob URL 생성
+                        const blobUrl = URL.createObjectURL(file);
+                        
+                        // Electron의 nativeIO를 통해 파일 저장
+                        if (window.nativeIO && window.nativeIO.saveBlobToFile) {
+                            filePath = await window.nativeIO.saveBlobToFile({
+                                blobUrl: blobUrl,
+                                fileName: file.name
+                            });
+                            URL.revokeObjectURL(blobUrl);
+                        } else {
+                            // 폴백: FileReader 사용
+                            console.log('📝 FileReader로 파일 읽기...');
+                            const buffer = await file.arrayBuffer();
+                            const uint8Array = new Uint8Array(buffer);
+                            
+                            // 바이너리 데이터를 직접 전송
+                            const tempPath = await window.electronAPI.saveBinaryFile({
+                                fileName: file.name,
+                                buffer: buffer
+                            });
+                            filePath = tempPath;
                         }
                     }
                     
-                    // Base64로 임시 파일 저장
-                    const tempPath = await window.electronAPI.saveToTemp({
-                        fileName: file.name,
-                        data: base64,
-                        isBase64: true
-                    });
-                    
-                    if (tempPath) {
-                        console.log('📍 임시 파일 경로:', tempPath);
+                    if (filePath) {
+                        console.log('📍 파일 경로:', filePath);
                         
                         // 파일 경로로 직접 오디오 추출
                         const result = await window.electronAPI.extractAudioFromPath({
-                            filePath: tempPath,
+                            filePath: filePath,
                             fileName: file.name,
                             quality: quality
                         });
@@ -1060,9 +1075,14 @@ class TranscriptionModal {
             formData.append('language', language);
         }
 
+        // 타임스탬프와 함께 상세 정보 요청
         if (document.getElementById('whisperTimestamps').checked) {
             formData.append('response_format', 'verbose_json');
+            formData.append('timestamp_granularities', 'segment');
         }
+        
+        // 프롬프트 추가 - 음악 구간도 포함하여 전사
+        formData.append('prompt', '이 오디오에는 대화, 나레이션, 또는 음악이 포함되어 있을 수 있습니다. 모든 음성 내용을 정확하게 전사해주세요.');
 
         // 프록시 서버 URL 설정 (로컬 개발 환경)
         // Electron 환경에서는 내장 프록시 서버 사용
@@ -1273,21 +1293,53 @@ class TranscriptionModal {
         document.getElementById('transcriptionResults').style.display = 'block';
         const contentDiv = document.getElementById('transcriptContent');
         
+        console.log('📝 전사 결과:', result);
+        
+        // 진행 상태 업데이트
+        this.updateProgress(100, '✅ 자막 추출 완료!', '결과를 확인하세요.');
+        
         let html = '';
 
         if (this.selectedMethod === 'whisper') {
-            if (result.segments) {
+            if (result.segments && result.segments.length > 0) {
                 // 타임스탬프가 있는 경우
+                let hasValidContent = false;
+                
                 result.segments.forEach(segment => {
                     const startTime = this.formatTime(segment.start);
                     const endTime = this.formatTime(segment.end);
+                    const text = segment.text || '';
+                    
+                    // 음표가 아닌 실제 내용이 있는지 확인
+                    if (text && text.trim() && !text.match(/^[♪♫♬]+$/)) {
+                        hasValidContent = true;
+                    }
+                    
                     html += `<div class="timestamp-line">
                         <span class="timestamp">[${startTime} - ${endTime}]</span>
-                        <span>${segment.text}</span>
+                        <span>${text}</span>
                     </div>`;
                 });
+                
+                // 음표만 있는 경우 안내 메시지
+                if (!hasValidContent) {
+                    html = `<div style="background: #ff9800; color: white; padding: 10px; border-radius: 4px; margin-bottom: 10px;">
+                        ⚠️ 음성이 감지되지 않았거나 음악만 있는 구간입니다.<br>
+                        • 비디오의 다른 구간을 선택해보세요<br>
+                        • 언어 설정을 확인해주세요<br>
+                        • 오디오 품질을 '하이엔드'로 설정해보세요
+                    </div>` + html;
+                }
             } else {
-                html = result.text || result;
+                const text = result.text || result || '';
+                // 단순 텍스트 - 음표만 있는지 확인
+                if (text.match(/^[♪♫♬\s]*$/)) {
+                    html = `<div style="background: #ff9800; color: white; padding: 10px; border-radius: 4px;">
+                        ⚠️ 음성이 감지되지 않았습니다. 비디오에 대화/나레이션이 있는지 확인해주세요.
+                    </div>`;
+                } else {
+                    html = text;
+                }
             }
         } else if (this.selectedMethod === 'assemblyai') {
             if (result.utterances) {
@@ -1362,6 +1414,58 @@ class TranscriptionModal {
 
         contentDiv.innerHTML = html;
         this.transcriptionResult = result;
+        
+        // 메인 시스템에 결과 전달
+        this.sendResultsToMain(result);
+        
+        // 처리 완료 상태 업데이트
+        this.isProcessing = false;
+        document.getElementById('startTranscription').disabled = false;
+        document.getElementById('startTranscription').querySelector('.btn-text').textContent = '자막 추출 시작';
+        document.getElementById('cancelTranscription').style.display = 'none';
+        
+        // 자동 닫기 옵션 (3초 후)
+        if (this.autoCloseOnComplete) {
+            setTimeout(() => {
+                console.log('✅ 자막 추출 완료 - 모달 자동 닫기');
+                this.close();
+            }, 3000);
+        }
+    }
+    
+    sendResultsToMain(result) {
+        try {
+            // 메인 페이지의 자막 컨테이너에 결과 전달
+            const mainSubtitleContainer = window.parent?.document?.getElementById('subtitleResultsContainer');
+            if (mainSubtitleContainer) {
+                let subtitleText = '';
+                
+                if (this.selectedMethod === 'whisper') {
+                    if (result.segments) {
+                        result.segments.forEach(segment => {
+                            subtitleText += segment.text + '\n';
+                        });
+                    } else if (result.text) {
+                        subtitleText = result.text;
+                    }
+                } else if (result.text) {
+                    subtitleText = result.text;
+                }
+                
+                // 메인 페이지에 이벤트 발송
+                const event = new CustomEvent('subtitleExtracted', {
+                    detail: {
+                        text: subtitleText,
+                        fullResult: result,
+                        method: this.selectedMethod
+                    }
+                });
+                window.parent.dispatchEvent(event);
+                console.log('📤 자막 결과를 메인 페이지로 전송');
+            }
+        } catch (error) {
+            console.error('❌ 메인 페이지로 결과 전송 실패:', error);
+        }
     }
 
     formatTime(seconds) {
