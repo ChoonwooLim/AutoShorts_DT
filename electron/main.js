@@ -117,7 +117,19 @@ async function createWindow() {
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
-        { role: 'toggleDevTools' },
+        { 
+          label: 'Toggle Developer Tools',
+          accelerator: 'F12',
+          click: (menuItem, browserWindow) => {
+            if (browserWindow) {
+              if (browserWindow.webContents.isDevToolsOpened()) {
+                browserWindow.webContents.closeDevTools();
+              } else {
+                browserWindow.webContents.openDevTools({ mode: 'right' });
+              }
+            }
+          }
+        },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
@@ -234,7 +246,8 @@ async function createWindow() {
     await win.loadURL(appUrl);
   }
   if (isDev) {
-    win.webContents.openDevTools({ mode: 'detach' });
+    // 개발자 도구를 앱 내부 우측에 표시 (별도 창이 아닌 도킹 모드)
+    win.webContents.openDevTools({ mode: 'right' });
   }
 }
 

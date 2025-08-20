@@ -43,6 +43,18 @@
         // 모달 닫기
         document.querySelector('#subtitleEditorProModal .close-btn').addEventListener('click', () => this.close());
         
+        // 최소화 버튼
+        const minimizeBtn = document.querySelector('#subtitleEditorProModal .minimize-btn');
+        if (minimizeBtn) {
+            minimizeBtn.addEventListener('click', () => this.minimize());
+        }
+        
+        // 최대화 버튼
+        const maximizeBtn = document.querySelector('#subtitleEditorProModal .maximize-btn');
+        if (maximizeBtn) {
+            maximizeBtn.addEventListener('click', () => this.toggleMaximize());
+        }
+        
         // 툴바 버튼들
         document.getElementById('undoBtn').addEventListener('click', () => this.undo());
         document.getElementById('redoBtn').addEventListener('click', () => this.redo());
@@ -138,6 +150,37 @@
         // 비디오 정지
         if (this.videoElement) {
             this.videoElement.pause();
+        }
+    };
+    
+    // 최소화
+    SubtitleEditorPro.prototype.minimize = function() {
+        const modal = document.getElementById('subtitleEditorProModal');
+        modal.style.display = 'none';
+        
+        // 최소화 상태 표시 (나중에 복원용)
+        this.isMinimized = true;
+    };
+    
+    // 최대화 토글
+    SubtitleEditorPro.prototype.toggleMaximize = function() {
+        const modal = document.getElementById('subtitleEditorProModal');
+        const content = modal.querySelector('.subtitle-editor-content');
+        
+        if (modal.classList.contains('maximized')) {
+            // 원래 크기로 복원
+            modal.classList.remove('maximized');
+            content.style.width = '';
+            content.style.height = '';
+            content.style.maxWidth = '';
+            content.style.maxHeight = '';
+        } else {
+            // 전체 화면으로 최대화
+            modal.classList.add('maximized');
+            content.style.width = '100vw';
+            content.style.height = '100vh';
+            content.style.maxWidth = '100vw';
+            content.style.maxHeight = '100vh';
         }
     };
 

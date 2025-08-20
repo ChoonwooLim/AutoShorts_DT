@@ -64,6 +64,7 @@ class OptionsModalManager {
         document.querySelectorAll('.option-button').forEach(button => {
             button.addEventListener('click', (e) => {
                 const category = e.currentTarget.dataset.category;
+                console.log('🔘 Option button clicked:', category);
                 this.openModal(category);
             });
         });
@@ -264,6 +265,20 @@ class OptionsModalManager {
      * 모달 열기
      */
     openModal(category) {
+        console.log('📂 openModal called with category:', category);
+        
+        // subtitle 카테고리는 별도 메뉴로 처리
+        if (category === 'subtitle') {
+            console.log('🎯 Subtitle category detected');
+            if (window.openSubtitleMenu) {
+                console.log('✅ Calling openSubtitleMenu');
+                window.openSubtitleMenu();
+            } else {
+                console.error('❌ openSubtitleMenu not found');
+            }
+            return;
+        }
+        
         const modalId = this.getCategoryModalId(category);
         const modal = document.getElementById(modalId);
         

@@ -327,6 +327,19 @@ class SubtitleEditorPro {
                 align-items: center;
                 justify-content: center;
             }
+            
+            /* 최대화 상태 스타일 */
+            .subtitle-editor-pro-modal.maximized {
+                padding: 0;
+            }
+            
+            .subtitle-editor-pro-modal.maximized .subtitle-editor-content {
+                width: 100vw !important;
+                height: 100vh !important;
+                max-width: 100vw !important;
+                max-height: 100vh !important;
+                border-radius: 0;
+            }
 
             .subtitle-editor-content {
                 width: 95%;
@@ -642,6 +655,49 @@ class SubtitleEditorPro {
                 font-weight: 600;
                 font-size: 14px;
                 border-bottom: 2px solid var(--border-color, #4a4a4a);
+            }
+            
+            /* 컬럼 너비 조정 */
+            .subtitle-table th:nth-child(1),
+            .subtitle-table td:nth-child(1) {
+                width: 40px; /* 체크박스 */
+            }
+            
+            .subtitle-table th:nth-child(2),
+            .subtitle-table td:nth-child(2) {
+                width: 50px; /* 번호 */
+            }
+            
+            .subtitle-table th:nth-child(3),
+            .subtitle-table td:nth-child(3) {
+                width: 100px; /* 시작 시간 */
+            }
+            
+            .subtitle-table th:nth-child(4),
+            .subtitle-table td:nth-child(4) {
+                width: 100px; /* 종료 시간 */
+            }
+            
+            .subtitle-table th:nth-child(5),
+            .subtitle-table td:nth-child(5) {
+                width: 100px; /* 화자 */
+            }
+            
+            .subtitle-table th:nth-child(6),
+            .subtitle-table td:nth-child(6) {
+                width: 40%; /* 원본 자막 - 더 넓게 */
+                min-width: 300px;
+            }
+            
+            .subtitle-table th:nth-child(7),
+            .subtitle-table td:nth-child(7) {
+                width: 40%; /* 번역 자막 - 더 넓게 */
+                min-width: 300px;
+            }
+            
+            .subtitle-table th:nth-child(8),
+            .subtitle-table td:nth-child(8) {
+                width: 120px; /* 작업 */
             }
 
             .subtitle-table td {
