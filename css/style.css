@@ -172,20 +172,7 @@
             flex-shrink: 0;
         }
 
-        .header-subtitle {
-            font-family: 'Brush Script MT', cursive, 'Dancing Script', cursive, 'Pacifico', cursive;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-            font-style: italic;
-            opacity: 0.8;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            line-height: 1.2;
-            letter-spacing: 0.3px;
-            flex: 1;
-            min-width: 0;
-        }
+        /* 헤더 부제목 제거됨 */
 
         .header-right {
             display: flex;
@@ -193,34 +180,7 @@
             gap: 1rem;
         }
 
-        .home-button {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.3rem;
-            padding: 0.5rem 0.8rem;
-            background: rgba(255, 255, 255, 0.08);
-            color: var(--text-secondary);
-            text-decoration: none;
-            border-radius: 8px;
-            font-size: 0.9rem;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            cursor: pointer;
-        }
-
-        .home-button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-            background: rgba(255, 255, 255, 0.12);
-            border-color: rgba(255, 255, 255, 0.15);
-            color: var(--text-primary);
-        }
-
-        .home-button:active {
-            transform: translateY(0);
-        }
+        /* TWINVERSE HOME 버튼 제거됨 */
 
         .home-icon {
             font-size: 1.1rem;
@@ -240,10 +200,7 @@
                 font-size: 2rem;
             }
             
-            .header-subtitle {
-                font-size: 0.7rem;
-                max-width: 300px;
-            }
+            /* 헤더 부제목 제거됨 */
             
             .main-layout {
                 grid-template-columns: 1fr;
@@ -285,56 +242,7 @@
             }
         }
 
-        .header-logo-link {
-            display: flex;
-            align-items: center;
-            text-decoration: none;
-            transition: transform 0.3s ease;
-        }
-
-        .header-logo-link:hover {
-            transform: scale(1.05);
-        }
-
-        .header-logo {
-            width: 45px;
-            height: 45px;
-            object-fit: contain;
-            cursor: pointer;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 2px;
-            transition: all 0.3s ease;
-        }
-        
-        .header-logo:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: scale(1.05);
-        }
-        
-        .header-logo-fallback {
-            width: 45px;
-            height: 45px;
-            background: linear-gradient(135deg, #00d4ff 0%, #40e0d0 100%);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .header-logo-fallback:hover {
-            transform: scale(1.05);
-            box-shadow: 0 0 15px rgba(64, 224, 208, 0.5);
-        }
-        
-        .header-logo-fallback .logo-text {
-            color: white;
-            font-weight: bold;
-            font-size: 16px;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-        }
+        /* TWINVERSE 로고 제거됨 */
 
         .theme-toggle-btn {
             background: none;
@@ -481,14 +389,7 @@
 
         /* ��� �׼� ��ư���� �޴��ٷ� �̵� �Ϸ� */
 
-        .header-logo {
-            position: absolute;
-            left: 0;
-            top: 50%;
-            transform: translateY(-60%); /* Adjusted from -50% to move it up */
-            height: 77px; /* Reduced from 96px (approx 20% reduction) */
-            width: auto;
-        }
+        /* 헤더 로고 스타일 제거됨 */
 
         /* �׸� ��� ��ư - �޴��� �̵��� (ȣȯ���� ���� ����) */
         #theme-toggle {
