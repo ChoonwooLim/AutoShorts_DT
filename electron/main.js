@@ -186,7 +186,7 @@ async function createWindow() {
       preload,
       nodeIntegration: false,
       contextIsolation: true,
-      devTools: isDev,
+      devTools: true,  // 개발자 도구 항상 활성화
       webSecurity: false  // 데스크톱 앱이므로 웹 보안 비활성화
     }
   });

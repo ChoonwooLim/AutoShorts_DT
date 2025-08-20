@@ -10,7 +10,18 @@
       "Bash(npm run dist:*)",
       "Bash(dir:*)",
       "Bash(npm run electron:dev:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(taskkill:*)",
+      "mcp__filesystem__list_directory",
+      "Bash(claude config list)",
+      "Bash(claude mcp:*)",
+      "Bash(icacls:*)",
+      "Bash(cmd /c:*)",
+      "Bash(where claude)",
+      "mcp__filesystem__read_text_file",
+      "Bash(powershell:*)",
+      "Bash(copy:*)",
+      "Bash(npm search:*)"
     ],
     "deny": [],
     "ask": []
