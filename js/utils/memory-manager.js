@@ -6,9 +6,22 @@ class MemoryManager {
     constructor() {
         this.allocatedObjects = new WeakSet();
         this.cleanupTasks = [];
-        this.memoryThreshold = 500 * 1024 * 1024; // 500MB
+        // 시스템 메모리의 80%까지 사용 가능 (최대 4GB)
+        this.memoryThreshold = Math.min(4096 * 1024 * 1024, this.getSystemMemoryLimit()); // 최대 4GB
         this.monitoringInterval = null;
         this.isMonitoring = false;
+    }
+    
+    /**
+     * 시스템 메모리 한계 계산
+     */
+    getSystemMemoryLimit() {
+        if (performance.memory && performance.memory.jsHeapSizeLimit) {
+            // Chrome에서 제공하는 힙 크기 제한의 80% 사용
+            return Math.floor(performance.memory.jsHeapSizeLimit * 0.8);
+        }
+        // 기본값: 2GB
+        return 2048 * 1024 * 1024;
     }
 
     /**

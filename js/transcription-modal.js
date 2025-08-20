@@ -862,25 +862,6 @@ class TranscriptionModal {
         }
     }
 
-    async saveFileToTemp(file) {
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const uint8Array = new Uint8Array(arrayBuffer);
-            
-            // Electron의 임시 디렉토리에 파일 저장
-            if (window.electronAPI && window.electronAPI.saveToTemp) {
-                const tempPath = await window.electronAPI.saveToTemp({
-                    fileName: file.name,
-                    data: Array.from(uint8Array)
-                });
-                return tempPath;
-            }
-        } catch (error) {
-            console.error('❌ 임시 파일 저장 실패:', error);
-        }
-        return null;
-    }
-
     async extractAudio(file) {
         console.log('🎵 오디오 추출 시작...');
         
@@ -897,15 +878,44 @@ class TranscriptionModal {
                 console.log('📦 파일 크기:', (file.size / 1024 / 1024).toFixed(2), 'MB');
                 
                 // 파일 크기에 따라 다른 처리 방식 사용
-                let base64 = '';
                 
-                if (file.size > 100 * 1024 * 1024) {
-                    // 100MB 이상: 파일 경로 직접 전달 (네이티브 FFmpeg에서 처리)
-                    console.log('🔧 대용량 파일 - 파일 경로 직접 전달');
+                if (file.size > 10 * 1024 * 1024) {
+                    // 10MB 이상: 파일 경로 직접 전달 (네이티브 FFmpeg에서 처리)
+                    console.log('🔧 대용량 파일 - 파일 경로 직접 전달 방식 사용');
+                    console.log('📁 임시 파일로 저장 중...');
                     
-                    // 파일을 임시 경로에 저장하고 경로 전달
-                    const tempPath = await this.saveFileToTemp(file);
+                    // File 객체를 ArrayBuffer로 읽기
+                    const arrayBuffer = await file.arrayBuffer();
+                    const uint8Array = new Uint8Array(arrayBuffer);
+                    
+                    // Base64로 변환 (청크 단위)
+                    let base64 = '';
+                    const chunkSize = 1024 * 1024; // 1MB 청크
+                    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                        const chunk = uint8Array.slice(i, i + chunkSize);
+                        // btoa를 안전하게 사용
+                        const chunkArray = Array.from(chunk);
+                        const chunkString = chunkArray.map(byte => String.fromCharCode(byte)).join('');
+                        base64 += btoa(chunkString);
+                        
+                        // 진행률 표시
+                        if (i % (10 * 1024 * 1024) === 0) {
+                            const progress = Math.min(20 + (i / uint8Array.length) * 10, 30);
+                            this.updateProgress(progress, '파일 준비 중...', `${((i / uint8Array.length) * 100).toFixed(0)}% 완료`);
+                        }
+                    }
+                    
+                    // Base64로 임시 파일 저장
+                    const tempPath = await window.electronAPI.saveToTemp({
+                        fileName: file.name,
+                        data: base64,
+                        isBase64: true
+                    });
+                    
                     if (tempPath) {
+                        console.log('📍 임시 파일 경로:', tempPath);
+                        
+                        // 파일 경로로 직접 오디오 추출
                         const result = await window.electronAPI.extractAudioFromPath({
                             filePath: tempPath,
                             fileName: file.name,
@@ -921,10 +931,13 @@ class TranscriptionModal {
                             const audioBlob = new Blob([bytes], { type: 'audio/mp3' });
                             console.log('✅ 대용량 파일 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
                             return audioBlob;
+                        } else if (result && result.error) {
+                            console.error('❌ FFmpeg 오류:', result.error);
+                            throw new Error(result.error);
                         }
                     }
                 } else {
-                    // 100MB 미만: Base64로 변환하여 전송
+                    // 10MB 미만: Base64로 변환하여 전송
                     console.log('📤 일반 파일 - Base64 변환 후 전송');
                     
                     const arrayBuffer = await file.arrayBuffer();

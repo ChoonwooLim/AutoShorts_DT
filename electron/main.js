@@ -410,15 +410,22 @@ ipcMain.handle('app:get-proxy-port', async () => {
 });
 
 // --- File Management ---
-ipcMain.handle('file:save-to-temp', async (_event, { fileName, data }) => {
+ipcMain.handle('file:save-to-temp', async (_event, { fileName, data, isBase64 }) => {
   try {
     const tempDir = app.getPath('temp');
     const timestamp = Date.now();
     const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
     const tempPath = path.join(tempDir, `temp_${timestamp}_${safeName}`);
     
-    // Uint8Array로 변환하여 파일 저장
-    const buffer = Buffer.from(data);
+    let buffer;
+    if (isBase64) {
+      // Base64 문자열로 전달된 경우
+      buffer = Buffer.from(data, 'base64');
+    } else {
+      // Array로 전달된 경우
+      buffer = Buffer.from(data);
+    }
+    
     fs.writeFileSync(tempPath, buffer);
     
     console.log(`📁 임시 파일 저장: ${tempPath} (${(buffer.length / 1024 / 1024).toFixed(2)}MB)`);
