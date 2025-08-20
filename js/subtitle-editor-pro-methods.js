@@ -668,4 +668,24 @@
     SubtitleEditorPro.prototype.findNext = function() { console.log('Find Next'); };
     SubtitleEditorPro.prototype.replaceOne = function() { console.log('Replace One'); };
     SubtitleEditorPro.prototype.replaceAll = function() { console.log('Replace All'); };
+    
+    // 전역 인스턴스 생성
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            window.subtitleEditorPro = new SubtitleEditorPro();
+            // attachEventListeners 호출
+            if (window.subtitleEditorPro.attachEventListeners) {
+                window.subtitleEditorPro.attachEventListeners();
+            }
+            console.log('✅ SubtitleEditorPro 초기화 완료');
+        });
+    } else {
+        // 이미 로드된 경우
+        window.subtitleEditorPro = new SubtitleEditorPro();
+        // attachEventListeners 호출
+        if (window.subtitleEditorPro.attachEventListeners) {
+            window.subtitleEditorPro.attachEventListeners();
+        }
+        console.log('✅ SubtitleEditorPro 초기화 완료 (즉시)');
+    }
 })();

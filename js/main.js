@@ -98,11 +98,10 @@ async function main() {
         if (advancedTranscriptionBtn) {
             advancedTranscriptionBtn.addEventListener('click', () => {
                 console.log('🚀 고급 자막 추출 버튼 클릭됨');
-                // 전문 자막 편집기로 직접 이동
-                if (window.subtitleEditorPro && typeof window.subtitleEditorPro.open === 'function') {
-                    window.subtitleEditorPro.open();
+                if (window.openTranscriptionModal) {
+                    window.openTranscriptionModal(state.uploadedFile);
                 } else {
-                    console.warn('⚠️ 자막 편집기가 아직 로드되지 않았습니다.');
+                    console.error('❌ openTranscriptionModal 함수를 찾을 수 없습니다.');
                 }
             });
             console.log('🎙️ Advanced transcription button initialized.');

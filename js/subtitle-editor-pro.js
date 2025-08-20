@@ -17,7 +17,10 @@ class SubtitleEditorPro {
 
     init() {
         this.createModal();
-        this.attachEventListeners();
+        // attachEventListeners는 subtitle-editor-pro-methods.js에서 정의됨
+        if (this.attachEventListeners) {
+            this.attachEventListeners();
+        }
         this.loadSettings();
     }
 
@@ -926,14 +929,6 @@ class SubtitleEditorPro {
     // 나머지 메서드는 다음 파일에서 계속...
 }
 
-// DOM 로드 후 전역 인스턴스 생성
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        window.subtitleEditorPro = new SubtitleEditorPro();
-        console.log('✅ SubtitleEditorPro 초기화 완료');
-    });
-} else {
-    // 이미 로드된 경우
-    window.subtitleEditorPro = new SubtitleEditorPro();
-    console.log('✅ SubtitleEditorPro 초기화 완료 (즉시)');
-}
+// 전역 인스턴스는 subtitle-editor-pro-methods.js가 로드된 후 생성되도록 함
+// SubtitleEditorPro 클래스만 먼저 전역에 노출
+window.SubtitleEditorPro = SubtitleEditorPro;

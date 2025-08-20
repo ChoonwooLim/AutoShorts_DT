@@ -1693,11 +1693,19 @@ class TranscriptionModal {
 
 // 전역 인스턴스 생성 및 초기화
 const transcriptionModal = new TranscriptionModal();
-transcriptionModal.init();
+
+// DOM이 로드된 후 초기화
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        transcriptionModal.init();
+        console.log('✅ TranscriptionModal 초기화 완료');
+    });
+} else {
+    transcriptionModal.init();
+    console.log('✅ TranscriptionModal 초기화 완료');
+}
 
 // 전역 함수로 노출
 window.openTranscriptionModal = (file) => {
     transcriptionModal.open(file);
 };
-
-export default transcriptionModal;
