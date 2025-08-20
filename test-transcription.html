@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>자막 추출 테스트</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #444;
+            border-radius: 8px;
+            background: #2a2a2a;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .log {
+            margin-top: 10px;
+            padding: 10px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .success { color: #4CAF50; }
+        .error { color: #f44336; }
+        .info { color: #2196F3; }
+    </style>
+</head>
+<body>
+    <h1>🎙️ 자막 추출 테스트</h1>
+    
+    <div class="test-section">
+        <h2>1. Base64 변환 테스트</h2>
+        <button onclick="testBase64()">큰 파일 Base64 변환 테스트</button>
+        <div id="base64Log" class="log"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>2. 프록시 서버 연결 테스트</h2>
+        <button onclick="testProxyConnection()">프록시 서버 상태 확인</button>
+        <div id="proxyLog" class="log"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>3. 파일 업로드 테스트</h2>
+        <input type="file" id="testFile" accept="video/*">
+        <button onclick="testFileUpload()">파일 처리 테스트</button>
+        <div id="fileLog" class="log"></div>
+    </div>
+
+    <script>
+        function log(elementId, message, type = 'info') {
+            const logDiv = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type;
+            logDiv.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        async function testBase64() {
+            const logId = 'base64Log';
+            log(logId, '테스트 시작...', 'info');
+            
+            try {
+                // 30MB 크기의 더미 데이터 생성
+                const size = 30 * 1024 * 1024;
+                const uint8Array = new Uint8Array(size);
+                for (let i = 0; i < size; i++) {
+                    uint8Array[i] = Math.floor(Math.random() * 256);
+                }
+                
+                log(logId, `생성된 데이터 크기: ${(size / 1024 / 1024).toFixed(2)}MB`, 'info');
+                
+                // 청크 단위로 Base64 변환
+                const startTime = Date.now();
+                let base64 = '';
+                const chunkSize = 8192;
+                
+                for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                    const chunk = uint8Array.slice(i, i + chunkSize);
+                    base64 += btoa(String.fromCharCode.apply(null, chunk));
+                    
+                    if (i % (1024 * 1024) === 0) {
+                        const progress = ((i / uint8Array.length) * 100).toFixed(1);
+                        log(logId, `변환 진행: ${progress}%`, 'info');
+                    }
+                }
+                
+                const elapsed = Date.now() - startTime;
+                log(logId, `✅ Base64 변환 성공! 소요시간: ${elapsed}ms`, 'success');
+                log(logId, `결과 문자열 길이: ${base64.length} 문자`, 'info');
+                
+            } catch (error) {
+                log(logId, `❌ 오류: ${error.message}`, 'error');
+            }
+        }
+
+        async function testProxyConnection() {
+            const logId = 'proxyLog';
+            log(logId, '프록시 서버 연결 테스트...', 'info');
+            
+            try {
+                // Electron 환경 확인
+                if (window.env && window.env.isElectron) {
+                    log(logId, '✅ Electron 환경 감지됨', 'success');
+                    
+                    // 프록시 포트 가져오기
+                    if (window.electronAPI && window.electronAPI.getProxyPort) {
+                        const port = await window.electronAPI.getProxyPort();
+                        log(logId, `프록시 포트: ${port}`, 'info');
+                        
+                        // 프록시 서버 상태 확인
+                        const response = await fetch(`http://localhost:${port}/api/status`);
+                        const data = await response.json();
+                        log(logId, `✅ 프록시 서버 응답: ${data.message}`, 'success');
+                    } else {
+                        log(logId, '⚠️ electronAPI.getProxyPort 없음', 'error');
+                    }
+                } else {
+                    log(logId, '브라우저 환경에서 실행 중', 'info');
+                }
+            } catch (error) {
+                log(logId, `❌ 오류: ${error.message}`, 'error');
+            }
+        }
+
+        async function testFileUpload() {
+            const logId = 'fileLog';
+            const fileInput = document.getElementById('testFile');
+            
+            if (!fileInput.files[0]) {
+                log(logId, '파일을 선택해주세요', 'error');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            log(logId, `파일: ${file.name}`, 'info');
+            log(logId, `크기: ${(file.size / 1024 / 1024).toFixed(2)}MB`, 'info');
+            
+            try {
+                // Electron API 테스트
+                if (window.electronAPI && window.electronAPI.extractAudio) {
+                    log(logId, 'Electron 네이티브 FFmpeg 테스트...', 'info');
+                    
+                    if (file.size > 25 * 1024 * 1024) {
+                        log(logId, '⚠️ 파일이 25MB보다 큽니다. 청크 처리 필요', 'info');
+                    } else {
+                        // 작은 파일은 Base64 변환 테스트
+                        const arrayBuffer = await file.arrayBuffer();
+                        const uint8Array = new Uint8Array(arrayBuffer);
+                        
+                        let base64 = '';
+                        const chunkSize = 8192;
+                        for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                            const chunk = uint8Array.slice(i, i + chunkSize);
+                            base64 += btoa(String.fromCharCode.apply(null, chunk));
+                        }
+                        
+                        log(logId, `✅ Base64 변환 성공 (${base64.length} 문자)`, 'success');
+                    }
+                } else {
+                    log(logId, 'Electron API 사용 불가, 브라우저 모드', 'info');
+                }
+                
+                log(logId, '✅ 파일 처리 테스트 완료', 'success');
+                
+            } catch (error) {
+                log(logId, `❌ 오류: ${error.message}`, 'error');
+            }
+        }
+        
+        // 페이지 로드 시 환경 확인
+        window.addEventListener('load', () => {
+            const info = [];
+            if (window.env && window.env.isElectron) {
+                info.push('✅ Electron 환경');
+            }
+            if (window.electronAPI) {
+                info.push('✅ electronAPI 사용 가능');
+            }
+            if (window.nativeFFmpeg) {
+                info.push('✅ nativeFFmpeg 사용 가능');
+            }
+            
+            if (info.length > 0) {
+                console.log('환경 정보:', info.join(', '));
+            }
+        });
+    </script>
+</body>
+</html>

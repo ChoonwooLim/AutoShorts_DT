@@ -862,6 +862,25 @@ class TranscriptionModal {
         }
     }
 
+    async saveFileToTemp(file) {
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            
+            // Electron의 임시 디렉토리에 파일 저장
+            if (window.electronAPI && window.electronAPI.saveToTemp) {
+                const tempPath = await window.electronAPI.saveToTemp({
+                    fileName: file.name,
+                    data: Array.from(uint8Array)
+                });
+                return tempPath;
+            }
+        } catch (error) {
+            console.error('❌ 임시 파일 저장 실패:', error);
+        }
+        return null;
+    }
+
     async extractAudio(file) {
         console.log('🎵 오디오 추출 시작...');
         
@@ -873,28 +892,74 @@ class TranscriptionModal {
         if (window.electronAPI && window.electronAPI.extractAudio) {
             try {
                 console.log('📦 네이티브 FFmpeg를 사용하여 오디오 추출 중...');
-                this.updateProgress(15, '네이티브 FFmpeg로 오디오 추출 중...', '빠른 속도로 처리 중입니다.');
+                this.updateProgress(15, '네이티브 FFmpeg로 오디오 추출 중...', '대용량 파일 처리 중입니다.');
                 
-                // 파일을 Base64로 변환
-                const arrayBuffer = await file.arrayBuffer();
-                const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                console.log('📦 파일 크기:', (file.size / 1024 / 1024).toFixed(2), 'MB');
                 
-                // IPC를 통해 오디오 추출 요청
-                const result = await window.electronAPI.extractAudio({
-                    videoData: base64,
-                    fileName: file.name
-                });
+                // 파일 크기에 따라 다른 처리 방식 사용
+                let base64 = '';
                 
-                if (result.success) {
-                    // Base64를 Blob으로 변환
-                    const binaryString = atob(result.audioData);
-                    const bytes = new Uint8Array(binaryString.length);
-                    for (let i = 0; i < binaryString.length; i++) {
-                        bytes[i] = binaryString.charCodeAt(i);
+                if (file.size > 100 * 1024 * 1024) {
+                    // 100MB 이상: 파일 경로 직접 전달 (네이티브 FFmpeg에서 처리)
+                    console.log('🔧 대용량 파일 - 파일 경로 직접 전달');
+                    
+                    // 파일을 임시 경로에 저장하고 경로 전달
+                    const tempPath = await this.saveFileToTemp(file);
+                    if (tempPath) {
+                        const result = await window.electronAPI.extractAudioFromPath({
+                            filePath: tempPath,
+                            fileName: file.name,
+                            quality: quality
+                        });
+                        
+                        if (result && result.success) {
+                            const binaryString = atob(result.audioData);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let i = 0; i < binaryString.length; i++) {
+                                bytes[i] = binaryString.charCodeAt(i);
+                            }
+                            const audioBlob = new Blob([bytes], { type: 'audio/mp3' });
+                            console.log('✅ 대용량 파일 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
+                            return audioBlob;
+                        }
                     }
-                    const audioBlob = new Blob([bytes], { type: 'audio/mp3' });
-                    console.log('✅ 네이티브 FFmpeg로 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
-                    return audioBlob;
+                } else {
+                    // 100MB 미만: Base64로 변환하여 전송
+                    console.log('📤 일반 파일 - Base64 변환 후 전송');
+                    
+                    const arrayBuffer = await file.arrayBuffer();
+                    const uint8Array = new Uint8Array(arrayBuffer);
+                    
+                    // 청크 단위로 Base64 변환 (메모리 오버플로우 방지)
+                    const chunkSize = 65536; // 64KB 청크로 증가
+                    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                        const chunk = uint8Array.slice(i, i + chunkSize);
+                        base64 += btoa(String.fromCharCode.apply(null, chunk));
+                        
+                        // 진행률 업데이트
+                        if (i % (1024 * 1024) === 0) {
+                            const progress = Math.min(15 + (i / uint8Array.length) * 10, 25);
+                            this.updateProgress(progress, '파일 변환 중...', `${((i / uint8Array.length) * 100).toFixed(0)}% 완료`);
+                        }
+                    }
+                    
+                    // IPC를 통해 오디오 추출 요청
+                    const result = await window.electronAPI.extractAudio({
+                        videoData: base64,
+                        fileName: file.name,
+                        quality: quality
+                    });
+                    
+                    if (result && result.success) {
+                        const binaryString = atob(result.audioData);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        const audioBlob = new Blob([bytes], { type: 'audio/mp3' });
+                        console.log('✅ 네이티브 FFmpeg로 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
+                        return audioBlob;
+                    }
                 }
             } catch (error) {
                 console.error('❌ 네이티브 FFmpeg 오디오 추출 실패:', error);
@@ -987,9 +1052,20 @@ class TranscriptionModal {
         }
 
         // 프록시 서버 URL 설정 (로컬 개발 환경)
-        const proxyUrl = window.location.hostname === 'localhost' 
-            ? 'http://localhost:3001/api' 
-            : '/api'; // 프로덕션에서는 같은 도메인 사용
+        // Electron 환경에서는 내장 프록시 서버 사용
+        let proxyUrl;
+        if (window.env && window.env.isElectron) {
+            // Electron 환경에서는 동적으로 프록시 포트 가져오기
+            const proxyPort = window.electronAPI && window.electronAPI.getProxyPort 
+                ? await window.electronAPI.getProxyPort() 
+                : 3003;
+            proxyUrl = `http://localhost:${proxyPort}/api`;
+            console.log(`🔗 Using Electron proxy on port ${proxyPort}`);
+        } else if (window.location.hostname === 'localhost') {
+            proxyUrl = 'http://localhost:3001/api';  // 개발 환경
+        } else {
+            proxyUrl = '/api'; // 프로덕션에서는 같은 도메인 사용
+        }
 
         if (document.getElementById('whisperTranslate').checked) {
             // 번역 엔드포인트 사용 (프록시 경유)

@@ -8,7 +8,8 @@
       "Bash(npm run build:app:*)",
       "Bash(npm run electron:preview:*)",
       "Bash(npm run dist:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(npm run electron:dev:*)"
     ],
     "deny": [],
     "ask": []

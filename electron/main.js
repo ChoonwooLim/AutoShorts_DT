@@ -67,7 +67,8 @@ async function createWindow() {
       preload,
       nodeIntegration: false,
       contextIsolation: true,
-      devTools: true
+      devTools: isDev,
+      webSecurity: false  // 데스크톱 앱이므로 웹 보안 비활성화
     }
   });
 
@@ -110,7 +111,8 @@ async function createWindow() {
           { source: '**/*', headers: [
             { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
             { key: 'Cross-Origin-Embedder-Policy', value: 'require-corp' },
-            { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' }
+            { key: 'Cross-Origin-Resource-Policy', value: 'cross-origin' }
+            // CSP 헤더 제거 - 데스크톱 앱에서는 불필요
           ] },
           { source: '**/*.js', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
           { source: '**/*.css', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
@@ -377,9 +379,12 @@ app.whenReady().then(async () => {
   initializeCache(app.getPath('userData'));
   
   // 프록시 서버 시작
+  let proxyPort = 3003;
   try {
-    const proxyPort = await startProxyServer();
+    proxyPort = await startProxyServer();
     console.log(`✅ Proxy server started on port ${proxyPort}`);
+    // 프록시 포트를 전역 변수로 저장
+    global.proxyPort = proxyPort;
   } catch (error) {
     console.error('❌ Failed to start proxy server:', error);
   }
@@ -396,6 +401,134 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+// --- App Info ---
+ipcMain.handle('app:get-proxy-port', async () => {
+  return global.proxyPort || 3003;
+});
+
+// --- File Management ---
+ipcMain.handle('file:save-to-temp', async (_event, { fileName, data }) => {
+  try {
+    const tempDir = app.getPath('temp');
+    const timestamp = Date.now();
+    const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const tempPath = path.join(tempDir, `temp_${timestamp}_${safeName}`);
+    
+    // Uint8Array로 변환하여 파일 저장
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(tempPath, buffer);
+    
+    console.log(`📁 임시 파일 저장: ${tempPath} (${(buffer.length / 1024 / 1024).toFixed(2)}MB)`);
+    return tempPath;
+  } catch (error) {
+    console.error('❌ 임시 파일 저장 실패:', error);
+    return null;
+  }
+});
+
+// --- Audio Extraction from Path ---
+ipcMain.handle('audio:extract-from-path', async (_event, { filePath, fileName, quality = 'high' }) => {
+  try {
+    console.log(`🎬 파일 경로에서 오디오 추출: ${filePath}`);
+    const tempDir = app.getPath('temp');
+    const timestamp = Date.now();
+    const outputPath = path.join(tempDir, `output_${timestamp}.mp3`);
+    
+    // 품질 설정에 따른 FFmpeg 파라미터
+    let args;
+    if (quality === 'high') {
+      args = [
+        '-y',
+        '-i', filePath,
+        '-vn',  // 비디오 제거
+        '-acodec', 'libmp3lame',
+        '-ar', '24000',  // 24kHz
+        '-ac', '1',  // 모노
+        '-b:a', '96k',  // 96kbps
+        '-q:a', '2',
+        '-t', '1200',  // 최대 20분
+        outputPath
+      ];
+      console.log('🏆 하이엔드 품질로 오디오 추출');
+    } else if (quality === 'medium') {
+      args = [
+        '-y',
+        '-i', filePath,
+        '-vn',
+        '-acodec', 'libmp3lame',
+        '-ar', '16000',
+        '-ac', '1',
+        '-b:a', '64k',
+        '-q:a', '4',
+        '-t', '1200',
+        outputPath
+      ];
+      console.log('⚖️ 표준 품질로 오디오 추출');
+    } else {
+      args = [
+        '-y',
+        '-i', filePath,
+        '-vn',
+        '-acodec', 'libmp3lame',
+        '-ar', '16000',
+        '-ac', '1',
+        '-b:a', '32k',
+        '-q:a', '7',
+        '-t', '1200',
+        outputPath
+      ];
+      console.log('⚡ 경량 품질로 오디오 추출');
+    }
+    
+    return new Promise((resolve, reject) => {
+      const proc = spawn(ffmpegPath, args);
+      let stderr = '';
+      
+      proc.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      
+      proc.on('close', (code) => {
+        // 임시 입력 파일 삭제
+        try {
+          if (filePath.includes('temp_')) {
+            fs.unlinkSync(filePath);
+          }
+        } catch (e) {}
+        
+        if (code !== 0) {
+          reject(new Error(`FFmpeg failed: ${stderr}`));
+          return;
+        }
+        
+        try {
+          const audioBuffer = fs.readFileSync(outputPath);
+          const audioBase64 = audioBuffer.toString('base64');
+          
+          // 출력 파일 크기 확인
+          const sizeMB = audioBuffer.length / (1024 * 1024);
+          console.log(`✅ 오디오 추출 완료: ${sizeMB.toFixed(2)}MB`);
+          
+          // 임시 출력 파일 삭제
+          fs.unlinkSync(outputPath);
+          
+          resolve({
+            success: true,
+            audioData: audioBase64
+          });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
   }
 });
 
