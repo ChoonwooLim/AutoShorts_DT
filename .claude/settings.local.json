@@ -21,7 +21,10 @@
       "mcp__filesystem__read_text_file",
       "Bash(powershell:*)",
       "Bash(copy:*)",
-      "Bash(npm search:*)"
+      "Bash(npm search:*)",
+      "mcp__filesystem__create_directory",
+      "Bash(mkdir:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []
