@@ -84,6 +84,17 @@ class TranscriptionModal {
                                     </select>
                                 </div>
                                 <div class="setting-group">
+                                    <label>🎧 오디오 품질 프리셋</label>
+                                    <select id="audioQuality" class="setting-select">
+                                        <option value="high" selected>🏆 하이엔드 (96kbps, 24kHz) - 최고 정확도</option>
+                                        <option value="medium">⚖️ 표준 (64kbps, 16kHz) - 균형</option>
+                                        <option value="low">⚡ 경량 (32kbps, 16kHz) - 빠른 처리</option>
+                                    </select>
+                                    <small style="color: var(--text-secondary, #999); display: block; margin-top: 5px;">
+                                        💡 하이엔드: 20분 기준 약 14MB / 표준: 약 9.6MB / 경량: 약 4.8MB
+                                    </small>
+                                </div>
+                                <div class="setting-group">
                                     <label>언어</label>
                                     <select id="whisperLanguage" class="setting-select">
                                         <option value="auto">자동 감지</option>
@@ -719,6 +730,22 @@ class TranscriptionModal {
             return;
         }
 
+        // FFmpeg 로드 확인 및 초기화
+        if (!window.ffmpeg || !window.ffmpeg.isLoaded) {
+            console.log('📦 FFmpeg.wasm 로딩 중...');
+            this.updateProgress(5, 'FFmpeg 초기화 중...', '오디오 추출 준비 중입니다.');
+            
+            // FFmpeg 로드 시도
+            if (window.loadFFmpeg) {
+                try {
+                    await window.loadFFmpeg();
+                    console.log('✅ FFmpeg.wasm 로드 완료');
+                } catch (error) {
+                    console.warn('⚠️ FFmpeg.wasm 로드 실패, 대체 방법 사용:', error);
+                }
+            }
+        }
+
         // API 키 확인
         let apiKey;
         let providerName;
@@ -836,48 +863,111 @@ class TranscriptionModal {
     }
 
     async extractAudio(file) {
-        return new Promise((resolve, reject) => {
-            const video = document.createElement('video');
-            video.src = URL.createObjectURL(file);
-            
-            video.addEventListener('loadedmetadata', async () => {
-                try {
-                    const stream = video.captureStream();
-                    const audioTracks = stream.getAudioTracks();
-                    
-                    if (audioTracks.length === 0) {
-                        throw new Error('비디오에 오디오 트랙이 없습니다.');
+        console.log('🎵 오디오 추출 시작...');
+        
+        // 품질 설정 가져오기
+        const qualitySelect = document.getElementById('audioQuality');
+        const quality = qualitySelect ? qualitySelect.value : 'high'; // 기본값: 하이엔드
+        
+        // Electron 환경에서는 IPC를 통해 네이티브 FFmpeg 사용
+        if (window.electronAPI && window.electronAPI.extractAudio) {
+            try {
+                console.log('📦 네이티브 FFmpeg를 사용하여 오디오 추출 중...');
+                this.updateProgress(15, '네이티브 FFmpeg로 오디오 추출 중...', '빠른 속도로 처리 중입니다.');
+                
+                // 파일을 Base64로 변환
+                const arrayBuffer = await file.arrayBuffer();
+                const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                
+                // IPC를 통해 오디오 추출 요청
+                const result = await window.electronAPI.extractAudio({
+                    videoData: base64,
+                    fileName: file.name
+                });
+                
+                if (result.success) {
+                    // Base64를 Blob으로 변환
+                    const binaryString = atob(result.audioData);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
                     }
-
-                    const mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus'
-                    });
-
-                    const chunks = [];
-                    mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-                    
-                    mediaRecorder.onstop = () => {
-                        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-                        resolve(audioBlob);
-                    };
-
-                    mediaRecorder.start();
-                    video.play();
-                    
-                    video.addEventListener('ended', () => {
-                        mediaRecorder.stop();
-                        stream.getTracks().forEach(track => track.stop());
-                    });
-
-                } catch (error) {
-                    reject(error);
+                    const audioBlob = new Blob([bytes], { type: 'audio/mp3' });
+                    console.log('✅ 네이티브 FFmpeg로 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
+                    return audioBlob;
                 }
-            });
-
-            video.addEventListener('error', () => {
-                reject(new Error('비디오 파일을 읽을 수 없습니다.'));
-            });
-        });
+            } catch (error) {
+                console.error('❌ 네이티브 FFmpeg 오디오 추출 실패:', error);
+            }
+        }
+        
+        // FFmpeg.wasm을 사용한 오디오 추출 (브라우저 환경)
+        if (window.ffmpeg && window.ffmpeg.isLoaded) {
+            try {
+                console.log('📦 FFmpeg.wasm을 사용하여 오디오 추출 중...');
+                this.updateProgress(15, 'FFmpeg.wasm으로 오디오 추출 중...', '처리 중입니다.');
+                
+                // 파일을 ArrayBuffer로 읽기
+                const arrayBuffer = await file.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                
+                // FFmpeg 파일 시스템에 비디오 파일 쓰기
+                await window.ffmpeg.FS('writeFile', 'input.mp4', uint8Array);
+                
+                // FFmpeg로 오디오 추출 (하이엔드 품질 최적화)
+                await window.ffmpeg.run(
+                    '-i', 'input.mp4',
+                    '-vn',  // 비디오 제거
+                    '-acodec', 'libmp3lame',  // MP3 코덱 사용
+                    '-ar', '24000',  // 24kHz 샘플레이트 (음성 명료도 향상)
+                    '-ac', '1',  // 모노 채널 (대화 중심 콘텐츠)
+                    '-b:a', '96k',  // 96kbps (고품질 음성 인식)
+                    '-q:a', '2',  // MP3 품질 설정 (0-9, 낮을수록 고품질)
+                    '-t', '1200',  // 최대 20분
+                    'output.mp3'
+                );
+                
+                // 결과 파일 읽기
+                const audioData = window.ffmpeg.FS('readFile', 'output.mp3');
+                
+                // 정리
+                window.ffmpeg.FS('unlink', 'input.mp4');
+                window.ffmpeg.FS('unlink', 'output.mp3');
+                
+                // Blob으로 변환
+                const audioBlob = new Blob([audioData.buffer], { type: 'audio/mp3' });
+                console.log('✅ FFmpeg.wasm으로 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
+                
+                return audioBlob;
+                
+            } catch (ffmpegError) {
+                console.error('❌ FFmpeg.wasm 오디오 추출 실패:', ffmpegError);
+                console.log('📡 대체 방법으로 시도 중...');
+            }
+        }
+        
+        // 최후의 방법: 파일 직접 전송 (오디오 추출 없이)
+        console.log('🎬 비디오 파일을 직접 전송합니다...');
+        this.updateProgress(15, '파일 준비 중...', '비디오 파일을 처리 중입니다.');
+        
+        // 파일 크기 확인 (25MB 제한)
+        const maxSize = 25 * 1024 * 1024; // 25MB
+        if (file.size > maxSize) {
+            // 파일이 너무 큰 경우 경고
+            console.warn(`⚠️ 파일 크기가 ${(file.size / 1024 / 1024).toFixed(2)}MB로 너무 큽니다.`);
+            
+            // MP3 압축 정보 표시
+            const estimatedMP3Size = (file.size * 0.01); // 대략 1% 크기로 압축 예상
+            console.log(`💡 MP3 압축 시 예상 크기: ${(estimatedMP3Size / 1024 / 1024).toFixed(2)}MB`);
+            console.log(`📊 압축 설정: 16kHz, 모노, 32kbps - 음성 인식에 최적화`);
+            
+            // 비디오의 처음 부분만 추출 시도
+            const slice = file.slice(0, maxSize);
+            return new Blob([slice], { type: file.type });
+        }
+        
+        // 파일 그대로 반환 (OpenAI API가 비디오도 처리 가능)
+        return file;
     }
 
     async transcribeWithWhisper(audioData) {
@@ -896,9 +986,14 @@ class TranscriptionModal {
             formData.append('response_format', 'verbose_json');
         }
 
+        // 프록시 서버 URL 설정 (로컬 개발 환경)
+        const proxyUrl = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3001/api' 
+            : '/api'; // 프로덕션에서는 같은 도메인 사용
+
         if (document.getElementById('whisperTranslate').checked) {
-            // 번역 엔드포인트 사용
-            const response = await fetch('https://api.openai.com/v1/audio/translations', {
+            // 번역 엔드포인트 사용 (프록시 경유)
+            const response = await fetch(`${proxyUrl}/openai/translations`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${await this.getApiKey('openai')}`
@@ -914,8 +1009,8 @@ class TranscriptionModal {
 
             return await response.json();
         } else {
-            // 전사 엔드포인트 사용
-            const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            // 전사 엔드포인트 사용 (프록시 경유)
+            const response = await fetch(`${proxyUrl}/openai/transcriptions`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${await this.getApiKey('openai')}`

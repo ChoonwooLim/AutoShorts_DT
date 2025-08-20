@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(npm run proxy:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run build:app:*)",
+      "Bash(npm run electron:preview:*)",
+      "Bash(npm run dist:*)",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []

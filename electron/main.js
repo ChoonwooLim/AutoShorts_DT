@@ -10,6 +10,11 @@ import { spawn } from 'node:child_process';
 import { initializeCache, getCachedOutputPath, hasCache, writeCacheFromTemp } from './cache.js';
 import { detectHardwareEncoders, pickBestH264Encoder, buildTranscodeArgs, parseFfmpegProgress } from './ffmpeg-utils.js';
 import getPort from 'get-port';
+import express from 'express';
+import cors from 'cors';
+import axios from 'axios';
+import multer from 'multer';
+import FormData from 'form-data';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production';
@@ -138,9 +143,247 @@ function tryLoad(win, url) {
   });
 }
 
+// 프록시 서버 설정 및 시작
+async function startProxyServer() {
+  const proxyApp = express();
+  const proxyPort = await getPort({ port: [3001, 3002, 3003, 0] });
+  
+  // 업로드 디렉토리 설정
+  const uploadsDir = path.join(app.getPath('temp'), 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  
+  const upload = multer({ 
+    dest: uploadsDir,
+    limits: { fileSize: 50 * 1024 * 1024 } // 50MB 제한
+  });
+
+  // CORS 설정
+  proxyApp.use(cors({
+    origin: true,
+    credentials: true
+  }));
+
+  // JSON 및 URL 인코딩 파싱
+  proxyApp.use(express.json({ limit: '50mb' }));
+  proxyApp.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  // 상태 확인 엔드포인트
+  proxyApp.get('/api/status', (req, res) => {
+    res.json({ status: 'ok', message: 'Proxy server is running in Electron' });
+  });
+
+  // OpenAI Whisper API 프록시
+  proxyApp.post('/api/openai/transcriptions', upload.single('file'), async (req, res) => {
+    try {
+      const apiKey = req.headers['authorization']?.replace('Bearer ', '');
+      
+      if (!apiKey) {
+        return res.status(401).json({ error: 'API key is required' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'Audio file is required' });
+      }
+
+      const formData = new FormData();
+      formData.append('file', fs.createReadStream(req.file.path), {
+        filename: 'audio.webm',
+        contentType: req.file.mimetype
+      });
+      formData.append('model', req.body.model || 'whisper-1');
+      
+      if (req.body.language) {
+        formData.append('language', req.body.language);
+      }
+      
+      if (req.body.response_format) {
+        formData.append('response_format', req.body.response_format);
+      }
+
+      const response = await axios.post(
+        'https://api.openai.com/v1/audio/transcriptions',
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            ...formData.getHeaders()
+          },
+          maxBodyLength: Infinity
+        }
+      );
+
+      fs.unlinkSync(req.file.path);
+      res.json(response.data);
+    } catch (error) {
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      
+      if (error.response) {
+        res.status(error.response.status).json(error.response.data);
+      } else {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  });
+
+  // AssemblyAI Upload 프록시
+  proxyApp.post('/api/assemblyai/upload', upload.single('audio'), async (req, res) => {
+    try {
+      const apiKey = req.headers['authorization'];
+      
+      if (!apiKey) {
+        return res.status(401).json({ error: 'API key is required' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'Audio file is required' });
+      }
+
+      const audioData = fs.readFileSync(req.file.path);
+
+      const response = await axios.post(
+        'https://api.assemblyai.com/v2/upload',
+        audioData,
+        {
+          headers: {
+            'authorization': apiKey,
+            'content-type': 'application/octet-stream'
+          }
+        }
+      );
+
+      fs.unlinkSync(req.file.path);
+      res.json(response.data);
+    } catch (error) {
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      
+      if (error.response) {
+        res.status(error.response.status).json(error.response.data);
+      } else {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  });
+
+  // AssemblyAI Transcript 프록시
+  proxyApp.post('/api/assemblyai/transcript', async (req, res) => {
+    try {
+      const apiKey = req.headers['authorization'];
+      
+      if (!apiKey) {
+        return res.status(401).json({ error: 'API key is required' });
+      }
+
+      const response = await axios.post(
+        'https://api.assemblyai.com/v2/transcript',
+        req.body,
+        {
+          headers: {
+            'authorization': apiKey,
+            'content-type': 'application/json'
+          }
+        }
+      );
+
+      res.json(response.data);
+    } catch (error) {
+      if (error.response) {
+        res.status(error.response.status).json(error.response.data);
+      } else {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  });
+
+  // AssemblyAI Transcript Status 프록시
+  proxyApp.get('/api/assemblyai/transcript/:id', async (req, res) => {
+    try {
+      const apiKey = req.headers['authorization'];
+      
+      if (!apiKey) {
+        return res.status(401).json({ error: 'API key is required' });
+      }
+
+      const response = await axios.get(
+        `https://api.assemblyai.com/v2/transcript/${req.params.id}`,
+        {
+          headers: {
+            'authorization': apiKey
+          }
+        }
+      );
+
+      res.json(response.data);
+    } catch (error) {
+      if (error.response) {
+        res.status(error.response.status).json(error.response.data);
+      } else {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  });
+
+  // Google Speech-to-Text 프록시
+  proxyApp.post('/api/google/speech', async (req, res) => {
+    try {
+      const apiKey = req.query.key;
+      
+      if (!apiKey) {
+        return res.status(401).json({ error: 'API key is required' });
+      }
+
+      const response = await axios.post(
+        `https://speech.googleapis.com/v1/speech:recognize?key=${apiKey}`,
+        req.body,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      res.json(response.data);
+    } catch (error) {
+      if (error.response) {
+        res.status(error.response.status).json(error.response.data);
+      } else {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  });
+
+  // 프록시 서버 시작
+  await new Promise((resolve, reject) => {
+    proxyApp.listen(proxyPort, (err) => {
+      if (err) {
+        reject(err);
+      } else {
+        console.log(`🚀 Proxy Server running on port ${proxyPort}`);
+        resolve();
+      }
+    });
+  });
+
+  return proxyPort;
+}
+
 // file 스킴에서 CORS/리소스 접근 이슈를 줄이기 위한 등록
 app.whenReady().then(async () => {
   initializeCache(app.getPath('userData'));
+  
+  // 프록시 서버 시작
+  try {
+    const proxyPort = await startProxyServer();
+    console.log(`✅ Proxy server started on port ${proxyPort}`);
+  } catch (error) {
+    console.error('❌ Failed to start proxy server:', error);
+  }
+  
   await createWindow();
 
   app.on('activate', () => {
@@ -153,6 +396,111 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+// --- Audio Extraction for Transcription ---
+ipcMain.handle('audio:extract', async (_event, { videoData, fileName, quality = 'high' }) => {
+  try {
+    const tempDir = app.getPath('temp');
+    const timestamp = Date.now();
+    const inputPath = path.join(tempDir, `input_${timestamp}.mp4`);
+    const outputPath = path.join(tempDir, `output_${timestamp}.mp3`);
+    
+    // Base64 데이터를 파일로 저장
+    const buffer = Buffer.from(videoData, 'base64');
+    fs.writeFileSync(inputPath, buffer);
+    
+    // 품질 설정에 따른 FFmpeg 파라미터
+    let args;
+    if (quality === 'high') {
+      // 하이엔드 품질 (최고 정확도)
+      args = [
+        '-y',
+        '-i', inputPath,
+        '-vn',  // 비디오 제거
+        '-acodec', 'libmp3lame',  // MP3 코덱
+        '-ar', '24000',  // 24kHz (음성 명료도 최적)
+        '-ac', '1',  // 모노
+        '-b:a', '96k',  // 96kbps
+        '-q:a', '2',  // 고품질
+        '-t', '1200',  // 최대 20분
+        outputPath
+      ];
+      console.log('🏆 하이엔드 품질로 오디오 추출 (96kbps, 24kHz)');
+    } else if (quality === 'medium') {
+      // 표준 품질 (균형)
+      args = [
+        '-y',
+        '-i', inputPath,
+        '-vn',
+        '-acodec', 'libmp3lame',
+        '-ar', '16000',  // 16kHz (Whisper 권장)
+        '-ac', '1',
+        '-b:a', '64k',  // 64kbps
+        '-q:a', '4',  // 표준 품질
+        '-t', '1200',
+        outputPath
+      ];
+      console.log('⚖️ 표준 품질로 오디오 추출 (64kbps, 16kHz)');
+    } else {
+      // 경량 품질 (빠른 처리)
+      args = [
+        '-y',
+        '-i', inputPath,
+        '-vn',
+        '-acodec', 'libmp3lame',
+        '-ar', '16000',  // 16kHz
+        '-ac', '1',
+        '-b:a', '32k',  // 32kbps
+        '-q:a', '7',  // 낮은 품질
+        '-t', '1200',
+        outputPath
+      ];
+      console.log('⚡ 경량 품질로 오디오 추출 (32kbps, 16kHz)');
+    }
+    
+    return new Promise((resolve, reject) => {
+      const proc = spawn(ffmpegPath, args);
+      let stderr = '';
+      
+      proc.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      
+      proc.on('close', (code) => {
+        // 임시 입력 파일 삭제
+        try {
+          fs.unlinkSync(inputPath);
+        } catch (e) {}
+        
+        if (code !== 0) {
+          reject(new Error(`FFmpeg failed with code ${code}: ${stderr}`));
+          return;
+        }
+        
+        try {
+          // 출력 파일 읽기
+          const audioBuffer = fs.readFileSync(outputPath);
+          const audioBase64 = audioBuffer.toString('base64');
+          
+          // 임시 출력 파일 삭제
+          fs.unlinkSync(outputPath);
+          
+          resolve({
+            success: true,
+            audioData: audioBase64
+          });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
   }
 });
 

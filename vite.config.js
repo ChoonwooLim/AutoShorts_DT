@@ -1,26 +1,9 @@
 import { defineConfig } from 'vite';
-import { viteStaticCopy } from 'vite-plugin-static-copy';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
 export default defineConfig({
   plugins: [
-    basicSsl(),
-    viteStaticCopy({
-      targets: [
-        {
-          src: 'node_modules/@ffmpeg/core-mt/dist/esm/*',
-          dest: 'ffmpeg'
-        },
-        {
-          src: 'node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js',
-          dest: 'ffmpeg'
-        },
-        {
-          src: 'public/models/*',
-          dest: 'models'
-        }
-      ]
-    })
+    basicSsl()
   ],
   server: {
     port: 5173,

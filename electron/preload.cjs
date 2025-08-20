@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('nativeFFmpeg', {
   onProgress: (cb) => ipcRenderer.on('ffmpeg:progress', (_e, data) => cb?.(data))
 });
 
+contextBridge.exposeInMainWorld('electronAPI', {
+  extractAudio: (params) => ipcRenderer.invoke('audio:extract', params)
+});
+
 contextBridge.exposeInMainWorld('nativeIO', {
   readFileAsBlobUrl: async (absolutePath) => ipcRenderer.invoke('io:read-file-url', absolutePath),
   readFileBytes: async (absolutePath) => ipcRenderer.invoke('io:read-file-bytes', absolutePath)
