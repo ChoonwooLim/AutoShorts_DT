@@ -31,4 +31,11 @@ contextBridge.exposeInMainWorld('sttProxy', {
   openai: (bytes, language, apiKey) => ipcRenderer.invoke('stt:openai', { bytes, language, apiKey })
 });
 
+// 테마 전환 이벤트 처리
+contextBridge.exposeInMainWorld('themeAPI', {
+  onToggleTheme: (callback) => {
+    ipcRenderer.on('toggle-theme', callback);
+  }
+});
+
 

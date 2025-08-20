@@ -28,9 +28,18 @@ export function updateTheme(isDarkMode) {
  * Sets up the event listener for the theme toggle button.
  */
 export function setupThemeEventListeners() {
+    // 기존 버튼 이벤트 리스너 (헤더 제거 예정)
     if (themeToggle) {
         themeToggle.addEventListener('click', () => {
             const isDarkMode = document.body.classList.toggle('dark-mode');
+            updateTheme(isDarkMode);
+        });
+    }
+    
+    // Electron 메뉴에서 테마 전환 이벤트 수신
+    if (window.themeAPI && window.themeAPI.onToggleTheme) {
+        window.themeAPI.onToggleTheme(() => {
+            const isDarkMode = !document.body.classList.contains('dark-mode');
             updateTheme(isDarkMode);
         });
     }

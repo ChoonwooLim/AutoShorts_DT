@@ -1,0 +1,52 @@
+/* 레이아웃 오버라이드 - 헤더 제거 및 단일 컬럼 레이아웃 */
+
+/* 헤더 완전 제거 */
+.main-header {
+    display: none !important;
+}
+
+/* 메인 레이아웃 - 전체 화면 사용 */
+.main-layout {
+    display: block !important;
+    width: 100% !important;
+    height: 100vh !important;
+    padding: 1rem !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    max-width: none !important;
+}
+
+/* 왼쪽 패널 - 전체 너비 사용 */
+.left-panel {
+    width: 100% !important;
+    height: calc(100vh - 2rem) !important;
+    max-width: none !important;
+    overflow: auto !important;
+    margin: 0 !important;
+}
+
+/* 오른쪽 패널 제거 */
+.right-panel {
+    display: none !important;
+}
+
+/* 자막 결과 섹션 제거 */
+.results-lower-section,
+.results-upper-section,
+#resultsContainer {
+    display: none !important;
+}
+
+/* 테마 전환 버튼 제거 (Electron 메뉴로 이동) */
+.theme-toggle-btn,
+#themeToggle {
+    display: none !important;
+}
+
+/* HOME 버튼 관련 제거 */
+.home-button,
+.header-logo-link,
+.header-logo,
+.header-logo-fallback {
+    display: none !important;
+}
