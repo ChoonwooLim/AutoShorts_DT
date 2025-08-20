@@ -311,7 +311,7 @@
                             <button id="copySubtitleBtn" class="subtitle-action-btn" title="자막 복사">📋</button>
                             <button id="downloadSubtitleBtn" class="subtitle-action-btn" title="자막 다운로드">💾</button>
                             <button id="clearSubtitleBtn" class="subtitle-action-btn" title="자막 지우기">🗑️</button>
-                            <button id="openSubtitleEditorBtn" class="subtitle-action-btn" title="자막 편집/번역">🛠️</button>
+                            <button id="openSubtitleEditorBtn" class="subtitle-action-btn" title="자막 편집/번역" onclick="if(window.subtitleEditorPro) window.subtitleEditorPro.open(window.state && window.state.subtitles)">🛠️</button>
                         </div>
                     </div>
                     <div class="subtitle-results-container" id="subtitleResultsContainer" aria-hidden="true">
@@ -444,6 +444,9 @@
     <script type="module" src="js/ui-file.js"></script>
     <script type="module" src="js/transcription-modal.js"></script>
     <script type="module" src="js/subtitle-editor-modal.js"></script>
+    <script src="js/subtitle-editor-pro.js"></script>
+    <script src="js/subtitle-editor-pro-methods.js"></script>
+    <script src="js/subtitle-editor-pro-export.js"></script>
     <script type="module" src="js/main.js"></script>
 </body>
 </html>

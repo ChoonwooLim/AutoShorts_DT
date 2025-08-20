@@ -150,7 +150,10 @@ async function main() {
                         state.subtitles = segments;
                     }
 
-                    if (window.subtitleEditorModal && typeof window.subtitleEditorModal.open === 'function') {
+                    // 새로운 전문 자막 편집기 열기
+                    if (window.subtitleEditorPro && typeof window.subtitleEditorPro.open === 'function') {
+                        window.subtitleEditorPro.open(segments.length ? segments : undefined);
+                    } else if (window.subtitleEditorModal && typeof window.subtitleEditorModal.open === 'function') {
                         window.subtitleEditorModal.open(segments.length ? segments : undefined);
                     } else {
                         // 늦게 로드되는 경우를 대비한 폴백 이벤트
