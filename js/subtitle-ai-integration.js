@@ -16,72 +16,201 @@ export async function sendSubtitlesToAI(subtitleData) {
     try {
         console.log('🤖 자막을 AI 어시스턴트로 전송 중...');
         
-        // 현재 선택된 AI 모델 확인
-        const mainModelKey = DOM.mainModelSelect?.value || 'gemini';
-        const subModel = DOM.subModelSelect?.value || 'Gemini 2.0 Flash';
-        
-        // 자막 데이터 포맷팅
-        const formattedSubtitles = formatSubtitlesForAI(subtitleData);
-        
-        // 시스템 프롬프트 생성
-        const systemPrompt = `당신은 비디오 자막 분석 전문가입니다. 
-제공된 자막 내용을 완전히 이해하고 분석하여 다음 작업들을 수행할 수 있습니다:
-- 자막 내용 요약 및 핵심 포인트 추출
-- 흥미로운 구간 식별 및 하이라이트 추천
-- 숏폼 비디오(쇼츠, 릴스) 제작을 위한 최적 구간 선택
-- 자막 텍스트 개선 및 편집 제안
-- 키워드 및 해시태그 추출
-
-항상 한국어로 응답하고, 구체적이고 실용적인 제안을 제공하세요.`;
-
-        // 사용자 메시지 생성
-        const userMessage = `다음은 비디오 자막 내용입니다. 이 자막을 완전히 분석하고 이해해주세요:
-
-${formattedSubtitles}
-
-자막 메타데이터:
-- 추출 방법: ${subtitleData.method}
-- 총 세그먼트 수: ${subtitleData.segments?.length || 0}
-- 총 길이: ${calculateTotalDuration(subtitleData.segments)}
-${subtitleData.fileName ? `- 파일명: ${subtitleData.fileName}` : ''}
-
-이제 이 자막 내용을 기반으로 다음을 수행할 준비가 되었습니다:
-1. 숏폼 콘텐츠 제작을 위한 하이라이트 구간 추천
-2. 자막 텍스트 개선 및 편집
-3. 키워드 및 해시태그 추출
-4. 콘텐츠 요약 및 분석
-
-자막 내용을 완전히 파악했다면 "✅ 자막 내용을 완전히 이해했습니다" 라고 응답하고, 
-주요 내용을 3-5줄로 요약해주세요.`;
-
-        // AI에게 전송
-        const response = await callAI(mainModelKey, subModel, systemPrompt, userMessage);
-        
-        console.log('✅ AI가 자막 내용을 파악했습니다:', response);
-        
-        // UI에 상태 표시
-        showAINotification('AI가 자막 내용을 파악했습니다', 'success');
-        
-        // AI 응답을 UI에 표시 (채팅 인터페이스가 있다면)
-        if (window.displayAIResponse) {
-            window.displayAIResponse(response);
-        }
+        // 먼저 AI 채팅창에 자막 내용을 표시
+        displaySubtitlesInChat(subtitleData);
         
         // 자막 컨텍스트를 전역 상태에 저장
         window.currentSubtitleContext = {
             data: subtitleData,
-            aiAnalyzed: true,
-            analyzedAt: new Date().toISOString(),
-            model: `${mainModelKey}/${subModel}`
+            aiAnalyzed: false,
+            analyzedAt: new Date().toISOString()
         };
         
-        return response;
+        // UI에 상태 표시
+        showAINotification('자막이 로드되었습니다', 'success');
+        
+        console.log('✅ 자막이 AI 채팅창에 표시되었습니다');
+        
+        // AI에게 자막을 자동으로 분석시키지 않고, 사용자가 요청할 때만 분석
+        // 자막 데이터는 이미 전역 컨텍스트에 저장되어 있으므로 
+        // 사용자가 질문하면 자동으로 참조됩니다
+        
+        return '자막이 성공적으로 로드되었습니다';
         
     } catch (error) {
         console.error('❌ AI 자막 분석 실패:', error);
         showAINotification('AI 자막 분석 실패: ' + error.message, 'error');
         throw error;
     }
+}
+
+/**
+ * 자막을 AI 채팅창에 표시
+ */
+function displaySubtitlesInChat(subtitleData) {
+    try {
+        // 깨끗하게 포맷팅된 자막 HTML 생성
+        let formattedHTML = '';
+        
+        // 헤더 정보
+        formattedHTML += `
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                <h3 style="margin: 0 0 10px 0; font-size: 18px;">📝 자막 로드 완료</h3>
+                <div style="font-size: 14px; opacity: 0.95;">
+                    ${subtitleData.fileName ? `<div>📁 파일: ${subtitleData.fileName}</div>` : ''}
+                    <div>🎬 추출 방법: ${getMethodName(subtitleData.method)}</div>
+                    <div>📊 총 ${subtitleData.segments?.length || 0}개 세그먼트</div>
+                    <div>⏱️ 총 길이: ${calculateTotalDuration(subtitleData.segments)}</div>
+                </div>
+            </div>
+        `;
+        
+        // 자막 내용을 소설 형식으로 표시
+        const novelText = formatSubtitlesAsNovel(subtitleData);
+        
+        formattedHTML += `
+            <div class="subtitle-content-scroll" style="background: var(--bg-secondary, #2a2a2a); border-radius: 10px; padding: 20px; max-height: 600px; overflow-y: auto;">
+                <h4 style="color: var(--text-primary, #e0e0e0); margin: 0 0 20px 0; text-align: center;">📖 자막 내용</h4>
+                <div style="color: var(--text-primary, #e0e0e0); line-height: 1.8; font-size: 15px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                    ${novelText}
+                </div>
+            </div>
+        `;
+        
+        // AI 채팅창에 추가
+        if (window.addSystemMessageToChat) {
+            window.addSystemMessageToChat(formattedHTML, '');
+        } else {
+            // 폴백: addMessageToHistory 사용
+            const chatHistory = document.getElementById('chatHistory');
+            if (chatHistory) {
+                const messageEl = document.createElement('div');
+                messageEl.className = 'chat-message system-message';
+                messageEl.innerHTML = `
+                    <div class="avatar">📝</div>
+                    <div class="message-content">
+                        ${formattedHTML}
+                    </div>
+                `;
+                chatHistory.appendChild(messageEl);
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            }
+        }
+        
+        console.log('✅ 자막이 AI 채팅창에 표시되었습니다');
+        
+    } catch (error) {
+        console.error('❌ 자막 표시 실패:', error);
+    }
+}
+
+/**
+ * 자막을 소설 형식으로 포맷팅
+ */
+function formatSubtitlesAsNovel(subtitleData) {
+    let novelText = '';
+    
+    if (subtitleData.segments && subtitleData.segments.length > 0) {
+        // 화자별로 그룹화
+        const groupedBySpeaker = groupSubtitlesBySpeaker(subtitleData.segments);
+        const speakers = Object.keys(groupedBySpeaker);
+        
+        if (speakers.length > 1 && !speakers.includes('알 수 없음')) {
+            // 화자가 여러 명인 경우 - 대화 형식
+            subtitleData.segments.forEach((segment, index) => {
+                if (segment.text && segment.text.trim()) {
+                    if (segment.speaker) {
+                        // 화자가 있는 경우
+                        novelText += `<p style="margin-bottom: 15px;"><strong style="color: #667eea;">${segment.speaker}:</strong> "${segment.text.trim()}"</p>`;
+                    } else {
+                        // 화자가 없는 경우 (나레이션으로 처리)
+                        novelText += `<p style="margin-bottom: 15px; font-style: italic; color: var(--text-secondary, #b0b0b0);">${segment.text.trim()}</p>`;
+                    }
+                }
+            });
+        } else {
+            // 화자가 한 명이거나 없는 경우 - 일반 텍스트 형식
+            let paragraphText = '';
+            
+            subtitleData.segments.forEach((segment, index) => {
+                if (segment.text && segment.text.trim()) {
+                    let text = segment.text.trim();
+                    
+                    // 문장 끝 처리
+                    if (!text.match(/[.!?]$/)) {
+                        // 다음 세그먼트가 있고, 현재 문장이 완전하지 않으면 공백 추가
+                        if (index < subtitleData.segments.length - 1) {
+                            text += ' ';
+                        }
+                    } else {
+                        // 문장이 끝나면 새 문단 시작
+                        text += ' ';
+                    }
+                    
+                    paragraphText += text;
+                    
+                    // 문단이 너무 길어지면 나누기 (약 200자마다)
+                    if (paragraphText.length > 200 && text.match(/[.!?]$/)) {
+                        novelText += `<p style="margin-bottom: 18px; text-align: justify;">${paragraphText.trim()}</p>`;
+                        paragraphText = '';
+                    }
+                }
+            });
+            
+            // 남은 텍스트 추가
+            if (paragraphText.trim()) {
+                novelText += `<p style="margin-bottom: 18px; text-align: justify;">${paragraphText.trim()}</p>`;
+            }
+        }
+    } else if (subtitleData.text) {
+        // 타임스탬프 없는 텍스트만 있는 경우
+        const sentences = subtitleData.text.split(/[.!?]+/).filter(s => s.trim());
+        let currentParagraph = '';
+        
+        sentences.forEach((sentence, index) => {
+            currentParagraph += sentence.trim() + '. ';
+            
+            // 3-4문장마다 새 문단
+            if ((index + 1) % 3 === 0 || index === sentences.length - 1) {
+                novelText += `<p style="margin-bottom: 18px; text-align: justify;">${currentParagraph.trim()}</p>`;
+                currentParagraph = '';
+            }
+        });
+    } else {
+        novelText = '<p style="text-align: center; color: var(--text-secondary, #999); font-style: italic;">자막 내용이 없습니다.</p>';
+    }
+    
+    return novelText;
+}
+
+/**
+ * 화자별로 자막 그룹화
+ */
+function groupSubtitlesBySpeaker(segments) {
+    const grouped = {};
+    
+    segments.forEach(segment => {
+        const speaker = segment.speaker || '알 수 없음';
+        if (!grouped[speaker]) {
+            grouped[speaker] = [];
+        }
+        grouped[speaker].push(segment);
+    });
+    
+    return grouped;
+}
+
+/**
+ * 추출 방법 이름 변환
+ */
+function getMethodName(method) {
+    const methodNames = {
+        'whisper': 'OpenAI Whisper',
+        'assemblyai': 'AssemblyAI',
+        'google': 'Google Speech-to-Text',
+        'import': '파일 가져오기'
+    };
+    return methodNames[method] || method;
 }
 
 /**
@@ -196,7 +325,7 @@ function showAINotification(message, type = 'info') {
     }, 3000);
 }
 
-// CSS 애니메이션 추가
+// CSS 애니메이션 및 스타일 추가
 if (!document.querySelector('#ai-notification-styles')) {
     const style = document.createElement('style');
     style.id = 'ai-notification-styles';
@@ -231,6 +360,37 @@ if (!document.querySelector('#ai-notification-styles')) {
         
         .ai-notification-icon {
             font-size: 18px;
+        }
+        
+        /* 시스템 메시지 스타일 */
+        .chat-message.system-message {
+            background: transparent;
+            border: none;
+            padding: 10px;
+        }
+        
+        .chat-message.system-message .message-content {
+            max-width: 100%;
+            background: transparent;
+        }
+        
+        /* 자막 내용 스크롤바 스타일 */
+        .subtitle-content-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .subtitle-content-scroll::-webkit-scrollbar-track {
+            background: var(--bg-tertiary, #3a3a3a);
+            border-radius: 4px;
+        }
+        
+        .subtitle-content-scroll::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+        
+        .subtitle-content-scroll::-webkit-scrollbar-thumb:hover {
+            background: #764ba2;
         }
     `;
     document.head.appendChild(style);

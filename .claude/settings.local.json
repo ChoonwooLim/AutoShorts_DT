@@ -9,7 +9,8 @@
       "Bash(npm run electron:preview:*)",
       "Bash(npm run dist:*)",
       "Bash(dir:*)",
-      "Bash(npm run electron:dev:*)"
+      "Bash(npm run electron:dev:*)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []
