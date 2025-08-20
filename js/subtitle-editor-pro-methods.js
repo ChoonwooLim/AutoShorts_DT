@@ -65,6 +65,9 @@
             maximizeBtn.addEventListener('click', () => this.toggleMaximize());
         }
         
+        // 드래그 기능 추가
+        this.setupDragAndResize();
+        
         // 툴바 버튼들
         document.getElementById('undoBtn').addEventListener('click', () => this.undo());
         document.getElementById('redoBtn').addEventListener('click', () => this.redo());
@@ -721,6 +724,169 @@
     SubtitleEditorPro.prototype.findNext = function() { console.log('Find Next'); };
     SubtitleEditorPro.prototype.replaceOne = function() { console.log('Replace One'); };
     SubtitleEditorPro.prototype.replaceAll = function() { console.log('Replace All'); };
+    
+    // 드래그 및 리사이즈 기능
+    SubtitleEditorPro.prototype.setupDragAndResize = function() {
+        const modal = document.getElementById('subtitleEditorProModal');
+        const content = modal.querySelector('.subtitle-editor-content');
+        const header = modal.querySelector('.subtitle-editor-header');
+        
+        let isDragging = false;
+        let isResizing = false;
+        let dragStartX, dragStartY, initialLeft, initialTop;
+        let resizeStartX, resizeStartY, initialWidth, initialHeight;
+        
+        // 헤더 드래그 기능
+        header.addEventListener('mousedown', (e) => {
+            // 버튼 클릭은 드래그하지 않음
+            if (e.target.closest('.header-actions')) return;
+            
+            isDragging = true;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            
+            const rect = content.getBoundingClientRect();
+            initialLeft = rect.left;
+            initialTop = rect.top;
+            
+            header.style.cursor = 'grabbing';
+        });
+        
+        // 리사이즈 핸들 생성 및 이벤트
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'resize-handle';
+        resizeHandle.style.cssText = `
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 20px;
+            height: 20px;
+            cursor: se-resize;
+            background: linear-gradient(-45deg, transparent 30%, #667eea 30%, #667eea 60%, transparent 60%);
+            z-index: 1003;
+        `;
+        content.appendChild(resizeHandle);
+        
+        resizeHandle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            isResizing = true;
+            resizeStartX = e.clientX;
+            resizeStartY = e.clientY;
+            
+            const rect = content.getBoundingClientRect();
+            initialWidth = rect.width;
+            initialHeight = rect.height;
+        });
+        
+        // 마우스 이동 이벤트
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging && !modal.classList.contains('maximized')) {
+                const deltaX = e.clientX - dragStartX;
+                const deltaY = e.clientY - dragStartY;
+                
+                const newLeft = initialLeft + deltaX;
+                const newTop = initialTop + deltaY;
+                
+                // 화면 경계 체크
+                const maxLeft = window.innerWidth - content.offsetWidth;
+                const maxTop = window.innerHeight - content.offsetHeight;
+                
+                content.style.left = Math.max(0, Math.min(newLeft, maxLeft)) + 'px';
+                content.style.top = Math.max(0, Math.min(newTop, maxTop)) + 'px';
+                content.style.right = 'auto';
+                content.style.bottom = 'auto';
+            }
+            
+            if (isResizing && !modal.classList.contains('maximized')) {
+                const deltaX = e.clientX - resizeStartX;
+                const deltaY = e.clientY - resizeStartY;
+                
+                const newWidth = Math.max(800, initialWidth + deltaX);
+                const newHeight = Math.max(600, initialHeight + deltaY);
+                
+                // 화면 경계 체크
+                const rect = content.getBoundingClientRect();
+                const maxWidth = window.innerWidth - rect.left;
+                const maxHeight = window.innerHeight - rect.top;
+                
+                content.style.width = Math.min(newWidth, maxWidth) + 'px';
+                content.style.height = Math.min(newHeight, maxHeight) + 'px';
+            }
+        });
+        
+        // 마우스 업 이벤트
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                header.style.cursor = 'move';
+            }
+            
+            if (isResizing) {
+                isResizing = false;
+            }
+        });
+        
+        // 더블클릭으로 최대화/복원
+        header.addEventListener('dblclick', (e) => {
+            if (!e.target.closest('.header-actions')) {
+                this.toggleMaximize();
+            }
+        });
+    };
+    
+    // 최소화 기능
+    SubtitleEditorPro.prototype.minimize = function() {
+        const modal = document.getElementById('subtitleEditorProModal');
+        const content = modal.querySelector('.subtitle-editor-content');
+        
+        if (modal.classList.contains('minimized')) {
+            // 복원
+            modal.classList.remove('minimized');
+            content.style.display = 'flex';
+        } else {
+            // 최소화
+            modal.classList.add('minimized');
+            content.style.display = 'none';
+        }
+    };
+    
+    // 최대화/복원 기능
+    SubtitleEditorPro.prototype.toggleMaximize = function() {
+        const modal = document.getElementById('subtitleEditorProModal');
+        const content = modal.querySelector('.subtitle-editor-content');
+        const maximizeBtn = modal.querySelector('.maximize-btn');
+        
+        if (modal.classList.contains('maximized')) {
+            // 복원
+            modal.classList.remove('maximized');
+            maximizeBtn.textContent = '□';
+            maximizeBtn.title = '최대화';
+            
+            // 이전 위치와 크기로 복원
+            if (this.lastPosition) {
+                content.style.left = this.lastPosition.left;
+                content.style.top = this.lastPosition.top;
+                content.style.width = this.lastPosition.width;
+                content.style.height = this.lastPosition.height;
+            }
+        } else {
+            // 현재 위치와 크기 저장
+            const rect = content.getBoundingClientRect();
+            this.lastPosition = {
+                left: content.style.left || (rect.left + 'px'),
+                top: content.style.top || (rect.top + 'px'),
+                width: content.style.width || (rect.width + 'px'),
+                height: content.style.height || (rect.height + 'px')
+            };
+            
+            // 최대화
+            modal.classList.add('maximized');
+            maximizeBtn.textContent = '◱';
+            maximizeBtn.title = '복원';
+        }
+    };
     
     // 전역 인스턴스 생성
     if (document.readyState === 'loading') {

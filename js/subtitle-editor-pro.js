@@ -323,34 +323,60 @@ class SubtitleEditorPro {
             }
 
             .subtitle-editor-pro-modal.active {
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                display: block;
             }
             
             /* 최대화 상태 스타일 */
-            .subtitle-editor-pro-modal.maximized {
-                padding: 0;
-            }
-            
             .subtitle-editor-pro-modal.maximized .subtitle-editor-content {
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
                 width: 100vw !important;
                 height: 100vh !important;
-                max-width: 100vw !important;
-                max-height: 100vh !important;
-                border-radius: 0;
+                max-width: none !important;
+                max-height: none !important;
+                border-radius: 0 !important;
+                transform: none !important;
             }
 
             .subtitle-editor-content {
-                width: 95%;
-                height: 90%;
-                max-width: 1600px;
+                position: absolute;
+                top: 50px;
+                left: 50px;
+                width: calc(100vw - 100px);
+                height: calc(100vh - 100px);
+                min-width: 800px;
+                min-height: 600px;
+                max-width: calc(100vw - 20px);
+                max-height: calc(100vh - 20px);
                 background: var(--bg-primary, #1a1a1a);
                 border-radius: 12px;
                 display: flex;
                 flex-direction: column;
                 box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
                 animation: slideUp 0.3s ease;
+                overflow: hidden;
+            }
+            
+            /* 최소화 상태 스타일 */
+            .subtitle-editor-pro-modal.minimized {
+                background: transparent;
+            }
+            
+            .subtitle-editor-pro-modal.minimized .subtitle-editor-content {
+                display: none;
+            }
+            
+            /* 화면 중앙 정렬을 위한 조정 */
+            @media (max-width: 1000px) {
+                .subtitle-editor-content {
+                    width: calc(100vw - 40px);
+                    height: calc(100vh - 40px);
+                    left: 20px;
+                    top: 20px;
+                    min-width: 600px;
+                    min-height: 400px;
+                }
             }
 
             .subtitle-editor-header {
@@ -361,6 +387,10 @@ class SubtitleEditorPro {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 border-radius: 12px 12px 0 0;
                 color: white;
+                cursor: move;
+                user-select: none;
+                position: relative;
+                z-index: 1002;
             }
 
             .subtitle-editor-header h2 {
