@@ -292,34 +292,7 @@
                 </div>
             </div>
         </div>
-        <div class="right-panel">
-            <div id="resultsContainer">
-                <div class="results-upper-section">
-                    <div class="title-box"><h3>✅ 완성된 숏츠 영상</h3></div>
-                    <div class="shorts-carousel">
-                        <button class="carousel-btn prev" id="prevShortBtn">‹</button>
-                        <div class="shorts-viewport"><div id="shortsTrack"></div></div>
-                        <button class="carousel-btn next" id="nextShortBtn">›</button>
-                    </div>
-                    <div id="shorts-counter"></div>
-                    <div id="completedShortsGrid" style="display: none;"></div>
-                </div>
-                <div class="results-lower-section" style="display: none;">
-                    <div class="subtitle-results-header" aria-hidden="true">
-                        <h3>📝 추출된 자막</h3>
-                        <div class="subtitle-actions">
-                            <button id="copySubtitleBtn" class="subtitle-action-btn" title="자막 복사">📋</button>
-                            <button id="downloadSubtitleBtn" class="subtitle-action-btn" title="자막 다운로드">💾</button>
-                            <button id="clearSubtitleBtn" class="subtitle-action-btn" title="자막 지우기">🗑️</button>
-                            <button id="openSubtitleEditorBtn" class="subtitle-action-btn" title="자막 편집/번역" onclick="if(window.subtitleEditorPro) window.subtitleEditorPro.open(window.state && window.state.subtitles)">🛠️</button>
-                        </div>
-                    </div>
-                    <div class="subtitle-results-container" id="subtitleResultsContainer" aria-hidden="true">
-                        <div class="subtitle-placeholder-results"><div class="placeholder-icon">🎙️</div><p>영상을 업로드하고 자막 추출을 시작하세요</p><span>추출된 자막이 여기에 표시됩니다</span></div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <!-- 오른쪽 패널 제거됨 - 레이아웃 단순화 -->
     </div>
 
     <!-- API Key Modal -->
@@ -442,8 +415,8 @@
     <script type="module" src="js/ui-options-modal.js"></script>
     <script type="module" src="js/ui-theme.js"></script>
     <script type="module" src="js/ui-file.js"></script>
-    <script type="module" src="js/transcription-modal.js"></script>
-    <script type="module" src="js/subtitle-editor-modal.js"></script>
+    <!-- transcription-modal 제거됨 - 전문 편집기로 통합 -->
+    <!-- subtitle-editor-modal 제거됨 - 전문 편집기로 통합 -->
     <script src="js/subtitle-editor-pro.js"></script>
     <script src="js/subtitle-editor-pro-methods.js"></script>
     <script src="js/subtitle-editor-pro-export.js"></script>

@@ -1538,47 +1538,44 @@ class TranscriptionModal {
         document.getElementById('startTranscription').querySelector('.btn-text').textContent = '자막 추출 시작';
         document.getElementById('cancelTranscription').style.display = 'none';
         
-        // 자동 닫기 옵션 (3초 후)
+        // 자동 닫기 옵션 (2초 후)
         if (this.autoCloseOnComplete) {
             setTimeout(() => {
                 console.log('✅ 자막 추출 완료 - 모달 자동 닫기');
                 this.close();
-            }, 3000);
+            }, 2000);
         }
     }
     
     sendResultsToMain(result) {
         try {
-            // 메인 페이지의 자막 컨테이너에 결과 전달
-            const mainSubtitleContainer = window.parent?.document?.getElementById('subtitleResultsContainer');
-            if (mainSubtitleContainer) {
-                let subtitleText = '';
-                
-                if (this.selectedMethod === 'whisper') {
-                    if (result.segments) {
-                        result.segments.forEach(segment => {
-                            subtitleText += segment.text + '\n';
-                        });
-                    } else if (result.text) {
-                        subtitleText = result.text;
-                    }
+            // 기존 자막 표시창 제거 - 이제 전문 편집기로만 표시
+            let subtitleText = '';
+            
+            if (this.selectedMethod === 'whisper') {
+                if (result.segments) {
+                    result.segments.forEach(segment => {
+                        subtitleText += segment.text + '\n';
+                    });
                 } else if (result.text) {
                     subtitleText = result.text;
                 }
-                
-                // 메인 페이지에 이벤트 발송
-                const event = new CustomEvent('subtitleExtracted', {
-                    detail: {
-                        text: subtitleText,
-                        fullResult: result,
-                        method: this.selectedMethod
-                    }
-                });
-                window.parent.dispatchEvent(event);
-                console.log('📤 자막 결과를 메인 페이지로 전송');
+            } else if (result.text) {
+                subtitleText = result.text;
             }
+            
+            // 메인 페이지에 이벤트만 발송 (자막 표시창 없음)
+            const event = new CustomEvent('subtitleExtracted', {
+                detail: {
+                    text: subtitleText,
+                    fullResult: result,
+                    method: this.selectedMethod
+                }
+            });
+            window.parent.dispatchEvent(event);
+            console.log('📤 자막 추출 완료 - 전문 편집기에서 표시됩니다');
         } catch (error) {
-            console.error('❌ 메인 페이지로 결과 전송 실패:', error);
+            console.error('❌ 이벤트 발송 실패:', error);
         }
     }
 

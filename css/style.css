@@ -143,8 +143,7 @@
         }
 
         .main-layout {
-            display: grid;
-            grid-template-columns: 7fr 3fr; /* 7:3 ������ ���� */
+            display: block; /* 7:3 ������ ���� */
             gap: 2rem;
             padding-top: 1rem; /* ������� ���� �߰� */
         }
@@ -3842,15 +3841,9 @@
         }
         
         /* ?? �ϴ�: �ڸ� ��� ���� (55%) - ���� */
+        /* 기존 자막 표시창 제거됨 */
         .results-lower-section {
-            display: flex;
-            flex: 0 0 70%;
-            flex-direction: column;
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: var(--card-shadow);
+            display: none !important;
             min-height: 0; /* �÷��� �����÷ο� ���� */
         }
         

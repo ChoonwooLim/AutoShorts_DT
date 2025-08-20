@@ -5,6 +5,41 @@
 
     // 이벤트 리스너 설정
     SubtitleEditorPro.prototype.attachEventListeners = function() {
+        // 자막 추출 완료 이벤트 리스너
+        window.addEventListener('subtitleExtracted', (event) => {
+            console.log('🎬 SubtitleEditorPro: 자막 추출 완료 이벤트 수신');
+            
+            if (event.detail && event.detail.fullResult) {
+                const result = event.detail.fullResult;
+                let segments = [];
+                
+                // segments 추출
+                if (result.segments && Array.isArray(result.segments)) {
+                    segments = result.segments.map(s => ({
+                        start: Math.max(0, Math.round(Number(s.start)||0)),
+                        end: Math.max(0, Math.round(Number(s.end)||0)),
+                        text: String(s.text||'').trim(),
+                        speaker: s.speaker || ''
+                    }));
+                } else if (result.text) {
+                    // 단순 텍스트만 있는 경우
+                    segments = [{
+                        start: 0,
+                        end: 60,
+                        text: result.text,
+                        speaker: ''
+                    }];
+                }
+                
+                if (segments.length > 0) {
+                    console.log('🎬 전문 자막 편집기 자동 열기:', segments.length, '개 세그먼트');
+                    setTimeout(() => {
+                        this.open(segments);
+                    }, 2500); // 모달이 닫힌 후 열기
+                }
+            }
+        });
+        
         // 모달 닫기
         document.querySelector('#subtitleEditorProModal .close-btn').addEventListener('click', () => this.close());
         
@@ -67,11 +102,7 @@
 
     // 모달 열기
     SubtitleEditorPro.prototype.open = function(subtitles) {
-        // 기존 자막 표시창 숨기기
-        const oldContainer = document.querySelector('.results-lower-section');
-        if (oldContainer) {
-            oldContainer.style.display = 'none';
-        }
+        // 기존 자막 표시창은 이미 제거됨
         
         // 자막 데이터 설정
         this.subtitles = subtitles || [];

@@ -98,10 +98,11 @@ async function main() {
         if (advancedTranscriptionBtn) {
             advancedTranscriptionBtn.addEventListener('click', () => {
                 console.log('🚀 고급 자막 추출 버튼 클릭됨');
-                if (window.openTranscriptionModal) {
-                    window.openTranscriptionModal(state.uploadedFile);
+                // 전문 자막 편집기로 직접 이동
+                if (window.subtitleEditorPro && typeof window.subtitleEditorPro.open === 'function') {
+                    window.subtitleEditorPro.open();
                 } else {
-                    console.error('❌ openTranscriptionModal 함수를 찾을 수 없습니다.');
+                    console.warn('⚠️ 자막 편집기가 아직 로드되지 않았습니다.');
                 }
             });
             console.log('🎙️ Advanced transcription button initialized.');
@@ -114,24 +115,9 @@ async function main() {
             if (event.detail) {
                 const { text, method } = event.detail;
                 
-                // 자막 결과 섹션 표시
-                const resultsSection = document.querySelector('.results-lower-section');
-                if (resultsSection) {
-                    resultsSection.style.display = 'block';
-                }
+                // 기존 자막 표시창 제거됨 - 전문 편집기로 대체
+                console.log(`✅ ${method} 자막 추출 완료: ${text ? text.substring(0, 100) + '...' : ''}`);
                 
-                // 자막 컨테이너에 표시
-                const container = document.getElementById('subtitleResultsContainer');
-                if (container && text) {
-                    container.innerHTML = `
-                        <div style="padding: 15px;">
-                            <div style="color: #4CAF50; margin-bottom: 10px;">
-                                ✅ ${method} 자막 추출 완료
-                            </div>
-                            <pre style="white-space: pre-wrap;">${text}</pre>
-                        </div>
-                    `;
-                }
 
                 // ✅ 자동으로 자막 편집 모달 열기
                 try {

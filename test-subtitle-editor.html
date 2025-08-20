@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>자막 편집기 테스트</title>
+    <meta charset="UTF-8">
+</head>
+<body>
+    <h1>자막 편집기 테스트 페이지</h1>
+    <button onclick="testOpenEditor()">편집기 열기 테스트</button>
+    <button onclick="location.reload()">페이지 새로고침</button>
+    
+    <script>
+        function testOpenEditor() {
+            // 테스트용 자막 데이터
+            const testSegments = [
+                { start: 0, end: 5, text: "I'll help you find your family.", speaker: "Speaker 1" },
+                { start: 5, end: 10, text: "Wish us luck.", speaker: "Speaker 2" },
+                { start: 10, end: 15, text: "Good luck.", speaker: "Speaker 1" },
+                { start: 15, end: 20, text: "This is Aether. Are you receiving?", speaker: "Aether" },
+                { start: 20, end: 25, text: "Dr. Lofthouse, can you hear me?", speaker: "Dr. Lofthouse" }
+            ];
+            
+            if (window.subtitleEditorPro) {
+                console.log('편집기 열기 시도...');
+                window.subtitleEditorPro.open(testSegments);
+            } else {
+                alert('subtitleEditorPro가 로드되지 않았습니다.');
+            }
+        }
+        
+        // 페이지 로드 시 편집기 초기화 확인
+        window.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                if (window.subtitleEditorPro) {
+                    console.log('✅ 자막 편집기 준비 완료');
+                } else {
+                    console.error('❌ 자막 편집기 로드 실패');
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

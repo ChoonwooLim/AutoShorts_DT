@@ -926,5 +926,14 @@ class SubtitleEditorPro {
     // 나머지 메서드는 다음 파일에서 계속...
 }
 
-// 전역 인스턴스 생성
-window.subtitleEditorPro = new SubtitleEditorPro();
+// DOM 로드 후 전역 인스턴스 생성
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        window.subtitleEditorPro = new SubtitleEditorPro();
+        console.log('✅ SubtitleEditorPro 초기화 완료');
+    });
+} else {
+    // 이미 로드된 경우
+    window.subtitleEditorPro = new SubtitleEditorPro();
+    console.log('✅ SubtitleEditorPro 초기화 완료 (즉시)');
+}
