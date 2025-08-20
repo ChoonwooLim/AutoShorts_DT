@@ -100,8 +100,8 @@ class TranscriptionModal {
                                     <label>언어</label>
                                     <select id="whisperLanguage" class="setting-select">
                                         <option value="auto">자동 감지</option>
+                                        <option value="en" selected>영어</option>
                                         <option value="ko">한국어</option>
-                                        <option value="en">영어</option>
                                         <option value="ja">일본어</option>
                                         <option value="zh">중국어</option>
                                     </select>
@@ -117,8 +117,8 @@ class TranscriptionModal {
                                 <div class="setting-group">
                                     <label>언어</label>
                                     <select id="assemblyaiLanguage" class="setting-select">
+                                        <option value="en" selected>영어</option>
                                         <option value="ko">한국어</option>
-                                        <option value="en">영어</option>
                                         <option value="es">스페인어</option>
                                         <option value="fr">프랑스어</option>
                                         <option value="de">독일어</option>
@@ -151,8 +151,8 @@ class TranscriptionModal {
                                 <div class="setting-group">
                                     <label>언어</label>
                                     <select id="googleLanguage" class="setting-select">
+                                        <option value="en-US" selected>영어 (미국)</option>
                                         <option value="ko-KR">한국어</option>
-                                        <option value="en-US">영어 (미국)</option>
                                         <option value="en-GB">영어 (영국)</option>
                                         <option value="ja-JP">일본어</option>
                                         <option value="zh-CN">중국어 (간체)</option>
@@ -1292,7 +1292,9 @@ class TranscriptionModal {
             params.sentiment_analysis = true;
         }
 
-        if (document.getElementById('assemblyaiChapters').checked) {
+        // auto_chapters는 영어(en)에서만 지원됨
+        const language = document.getElementById('assemblyaiLanguage').value;
+        if (document.getElementById('assemblyaiChapters').checked && language === 'en') {
             params.auto_chapters = true;
         }
 
@@ -1350,57 +1352,102 @@ class TranscriptionModal {
     }
 
     async transcribeWithGoogle(audioData) {
-        this.updateProgress(30, 'Google Speech-to-Text로 처리 중...', '음성 데이터를 분석하고 있습니다.');
+        this.updateProgress(30, 'Gemini로 처리 중...', '음성 데이터를 분석하고 있습니다.');
 
-        // 오디오를 base64로 인코딩
-        const reader = new FileReader();
-        const audioBase64 = await new Promise((resolve) => {
-            reader.onloadend = () => resolve(reader.result.split(',')[1]);
-            reader.readAsDataURL(audioData);
-        });
+        try {
+            // Gemini API를 사용한 음성 인식
+            const googleKey = await this.getApiKey('google');
+            
+            // 오디오를 base64로 인코딩
+            const reader = new FileReader();
+            const audioBase64 = await new Promise((resolve) => {
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(audioData);
+            });
 
-        const config = {
-            encoding: 'WEBM_OPUS',
-            sampleRateHertz: 48000,
-            languageCode: document.getElementById('googleLanguage').value,
-            model: document.getElementById('googleModel').value,
-            enableWordTimeOffsets: document.getElementById('googleWordTime').checked,
-            enableAutomaticPunctuation: true,
-            enableSpeakerDiarization: document.getElementById('googleDiarization').checked,
-            diarizationSpeakerCount: 2,
-            profanityFilter: document.getElementById('googleProfanity').checked
-        };
+            // Gemini API로 음성 텍스트 변환 요청
+            const language = document.getElementById('googleLanguage').value;
+            const languageMap = {
+                'en-US': 'English',
+                'ko-KR': 'Korean',
+                'ja-JP': 'Japanese',
+                'zh-CN': 'Chinese'
+            };
+            
+            const prompt = `Please transcribe the following audio to text in ${languageMap[language] || 'English'}. 
+                           If there are multiple speakers, indicate them. 
+                           Provide timestamps if possible.
+                           Return ONLY the transcription without any additional explanation.`;
 
-        if (document.getElementById('googleAutoDetect').checked) {
-            config.alternativeLanguageCodes = ['en-US', 'ko-KR', 'ja-JP', 'zh-CN'];
-        }
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleKey}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [
+                            { text: prompt },
+                            {
+                                inline_data: {
+                                    mime_type: 'audio/webm',
+                                    data: audioBase64
+                                }
+                            }
+                        ]
+                    }]
+                })
+            });
 
-        const request = {
-            config: config,
-            audio: {
-                content: audioBase64
+            if (!response.ok) {
+                const errorData = await response.text();
+                console.error('🔴 Gemini API 오류:', errorData);
+                
+                // Speech-to-Text API 활성화 안내
+                if (response.status === 403 || response.status === 400) {
+                    throw new Error(`Gemini API 오류: 오디오 파일이 너무 크거나 지원되지 않는 형식입니다.\n\n대안:\n1. OpenAI Whisper 사용 (권장)\n2. AssemblyAI 사용\n3. 더 짧은 구간 선택`);
+                }
+                throw new Error(`Gemini API 오류 (${response.status}): ${response.statusText}`);
             }
-        };
 
-        const googleKey = await this.getApiKey('google');
-        const response = await fetch(`https://speech.googleapis.com/v1/speech:recognize?key=${googleKey}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(request)
-        });
+            const data = await response.json();
+            
+            // Gemini 응답을 Google Speech-to-Text 형식으로 변환
+            const transcription = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            
+            // 결과를 표준 형식으로 변환
+            const result = {
+                results: [{
+                    alternatives: [{
+                        transcript: transcription,
+                        confidence: 0.9
+                    }]
+                }]
+            };
 
-        if (!response.ok) {
-            const errorData = await response.text();
-            console.error('🔴 Google API 오류:', errorData);
-            throw new Error(`Google API 오류 (${response.status}): ${response.statusText}`);
+            this.updateProgress(100, '완료!', 'Gemini 처리 완료');
+            return result;
+
+        } catch (error) {
+            console.error('🔴 Gemini 음성 인식 실패:', error);
+            
+            // 대체 안내 메시지
+            const fallbackMessage = `
+Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
+
+1. Google Cloud Console에서 Speech-to-Text API 활성화
+   https://console.cloud.google.com/apis/api/speech.googleapis.com
+
+2. 또는 다른 서비스 사용:
+   - OpenAI Whisper (권장) ✅
+   - AssemblyAI ✅
+
+현재는 Gemini API로 대체 시도했으나 오디오 처리에 제한이 있을 수 있습니다.
+            `;
+            
+            console.log(fallbackMessage);
+            throw error;
         }
-
-        const result = await response.json();
-        this.updateProgress(100, '완료!', 'Google Speech-to-Text 처리 완료');
-        
-        return result;
     }
 
     displayResults(result) {
@@ -1456,44 +1503,87 @@ class TranscriptionModal {
                 }
             }
         } else if (this.selectedMethod === 'assemblyai') {
-            if (result.utterances) {
+            if (result.utterances && result.utterances.length > 0) {
                 // 화자 분리가 있는 경우
                 result.utterances.forEach(utterance => {
                     const startTime = this.formatTime(utterance.start / 1000);
+                    const endTime = this.formatTime(utterance.end / 1000);
                     html += `<div class="timestamp-line">
-                        <span class="timestamp">[${startTime}]</span>
+                        <span class="timestamp">[${startTime} - ${endTime}]</span>
                         <span class="speaker-label">화자 ${utterance.speaker}:</span>
                         <span>${utterance.text}</span>
                     </div>`;
                 });
-            } else if (result.words) {
-                // 단어별 타임스탬프
-                let currentLine = '';
-                let lineStart = 0;
+            } else if (result.words && result.words.length > 0) {
+                // 단어별 타임스탬프를 세그먼트로 그룹화
+                let segments = [];
+                let currentSegment = null;
+                let wordCount = 0;
                 
                 result.words.forEach((word, index) => {
-                    if (index === 0 || word.start - lineStart > 5000) {
-                        if (currentLine) {
-                            html += `<div class="timestamp-line">
-                                <span class="timestamp">[${this.formatTime(lineStart / 1000)}]</span>
-                                <span>${currentLine}</span>
-                            </div>`;
+                    // 첫 단어이거나 이전 단어와 1.5초 이상 차이나면 새 세그먼트
+                    if (!currentSegment || (word.start - currentSegment.end) > 1500) {
+                        if (currentSegment && currentSegment.text.trim()) {
+                            segments.push(currentSegment);
                         }
-                        currentLine = word.text;
-                        lineStart = word.start;
+                        currentSegment = {
+                            start: word.start,
+                            end: word.end,
+                            text: word.text
+                        };
+                        wordCount = 1;
                     } else {
-                        currentLine += ' ' + word.text;
+                        // 현재 세그먼트에 단어 추가
+                        currentSegment.text += ' ' + word.text;
+                        currentSegment.end = word.end;
+                        wordCount++;
+                        
+                        // 세그먼트 분리 조건 - 30자 제한 및 단어 수 제한
+                        const shouldSplit = 
+                            // 25자 이상이면 무조건 분리
+                            currentSegment.text.length >= 25 ||
+                            // 5단어 이상이면 분리
+                            wordCount >= 5 ||
+                            // 문장 끝 (마침표, 느낌표, 물음표)
+                            (word.text.match(/[.!?]$/) && currentSegment.text.length > 10) ||
+                            // 쉼표 뒤이고 15자 이상
+                            (word.text.match(/,$/) && currentSegment.text.length > 15) ||
+                            // 시간이 2.5초 이상
+                            (currentSegment.end - currentSegment.start) > 2500;
+                            
+                        if (shouldSplit) {
+                            segments.push(currentSegment);
+                            currentSegment = null;
+                            wordCount = 0;
+                        }
                     }
                 });
                 
-                if (currentLine) {
-                    html += `<div class="timestamp-line">
-                        <span class="timestamp">[${this.formatTime(lineStart / 1000)}]</span>
-                        <span>${currentLine}</span>
-                    </div>`;
+                // 마지막 세그먼트 추가
+                if (currentSegment && currentSegment.text.trim()) {
+                    segments.push(currentSegment);
                 }
+                
+                // 세그먼트를 HTML로 변환
+                segments.forEach(segment => {
+                    const startTime = this.formatTime(segment.start / 1000);
+                    const endTime = this.formatTime(segment.end / 1000);
+                    html += `<div class="timestamp-line">
+                        <span class="timestamp">[${startTime} - ${endTime}]</span>
+                        <span>${segment.text.trim()}</span>
+                    </div>`;
+                });
+            } else if (result.text) {
+                // 텍스트만 있는 경우 - 문장 단위로 분리
+                const sentences = result.text.match(/[^.!?]+[.!?]+/g) || [result.text];
+                sentences.forEach((sentence, index) => {
+                    html += `<div class="timestamp-line">
+                        <span class="timestamp">[${index + 1}]</span>
+                        <span>${sentence.trim()}</span>
+                    </div>`;
+                });
             } else {
-                html = result.text;
+                html = '<div>결과가 없습니다.</div>';
             }
         } else if (this.selectedMethod === 'google') {
             if (result.results) {
@@ -1549,31 +1639,157 @@ class TranscriptionModal {
     
     sendResultsToMain(result) {
         try {
-            // 기존 자막 표시창 제거 - 이제 전문 편집기로만 표시
-            let subtitleText = '';
+            // 결과를 세그먼트 형식으로 정규화
+            let normalizedResult = {
+                text: '',
+                segments: [],
+                method: this.selectedMethod
+            };
             
             if (this.selectedMethod === 'whisper') {
                 if (result.segments) {
+                    normalizedResult.segments = result.segments;
                     result.segments.forEach(segment => {
-                        subtitleText += segment.text + '\n';
+                        normalizedResult.text += segment.text + '\n';
                     });
                 } else if (result.text) {
-                    subtitleText = result.text;
+                    normalizedResult.text = result.text;
                 }
-            } else if (result.text) {
-                subtitleText = result.text;
+            } else if (this.selectedMethod === 'assemblyai') {
+                if (result.utterances && result.utterances.length > 0) {
+                    // 화자별 발화를 세그먼트로 변환
+                    normalizedResult.segments = result.utterances.map(utt => ({
+                        start: utt.start / 1000,
+                        end: utt.end / 1000,
+                        text: utt.text,
+                        speaker: `화자 ${utt.speaker}`
+                    }));
+                    normalizedResult.text = result.text;
+                } else if (result.words && result.words.length > 0) {
+                    // 단어들을 세그먼트로 그룹화
+                    let segments = [];
+                    let currentSegment = null;
+                    let wordCount = 0;
+                    
+                    result.words.forEach((word) => {
+                        // 첫 단어이거나 이전 단어와 1.5초 이상 차이나면 새 세그먼트
+                        if (!currentSegment || (word.start - currentSegment.end) > 1500) {
+                            if (currentSegment && currentSegment.text.trim()) {
+                                segments.push({
+                                    start: currentSegment.start / 1000,
+                                    end: currentSegment.end / 1000,
+                                    text: currentSegment.text.trim()
+                                });
+                            }
+                            currentSegment = {
+                                start: word.start,
+                                end: word.end,
+                                text: word.text
+                            };
+                            wordCount = 1;
+                        } else {
+                            currentSegment.text += ' ' + word.text;
+                            currentSegment.end = word.end;
+                            wordCount++;
+                            
+                            // 세그먼트 분리 조건 - 30자 제한 및 단어 수 제한
+                            const shouldSplit = 
+                                // 25자 이상이면 무조건 분리
+                                currentSegment.text.length >= 25 ||
+                                // 5단어 이상이면 분리
+                                wordCount >= 5 ||
+                                // 문장 끝
+                                (word.text.match(/[.!?]$/) && currentSegment.text.length > 10) ||
+                                // 쉼표 뒤이고 15자 이상
+                                (word.text.match(/,$/) && currentSegment.text.length > 15) ||
+                                // 시간이 2.5초 이상
+                                (currentSegment.end - currentSegment.start) > 2500;
+                                
+                            if (shouldSplit) {
+                                segments.push({
+                                    start: currentSegment.start / 1000,
+                                    end: currentSegment.end / 1000,
+                                    text: currentSegment.text.trim()
+                                });
+                                currentSegment = null;
+                                wordCount = 0;
+                            }
+                        }
+                    });
+                    
+                    if (currentSegment && currentSegment.text.trim()) {
+                        segments.push({
+                            start: currentSegment.start / 1000,
+                            end: currentSegment.end / 1000,
+                            text: currentSegment.text.trim()
+                        });
+                    }
+                    
+                    normalizedResult.segments = segments;
+                    normalizedResult.text = result.text;
+                } else if (result.text) {
+                    normalizedResult.text = result.text;
+                    // 텍스트를 문장 단위로 가상 세그먼트 생성
+                    const sentences = result.text.match(/[^.!?]+[.!?]+/g) || [result.text];
+                    let time = 0;
+                    normalizedResult.segments = sentences.map(sentence => {
+                        const segment = {
+                            start: time,
+                            end: time + 3,
+                            text: sentence.trim()
+                        };
+                        time += 3;
+                        return segment;
+                    });
+                }
+            } else if (this.selectedMethod === 'google' && result.results) {
+                // Google 결과 처리
+                normalizedResult.segments = [];
+                result.results.forEach(r => {
+                    if (r.alternatives[0].words) {
+                        let segment = {
+                            start: 0,
+                            end: 0,
+                            text: ''
+                        };
+                        r.alternatives[0].words.forEach((word, index) => {
+                            if (index === 0) {
+                                segment.start = parseFloat(word.startTime.replace('s', ''));
+                            }
+                            segment.text += word.word + ' ';
+                            segment.end = parseFloat(word.endTime.replace('s', ''));
+                            
+                            if (word.word.match(/[.!?]$/) || index === r.alternatives[0].words.length - 1) {
+                                normalizedResult.segments.push({...segment, text: segment.text.trim()});
+                                segment = { start: 0, end: 0, text: '' };
+                            }
+                        });
+                    }
+                    normalizedResult.text += r.alternatives[0].transcript + ' ';
+                });
             }
             
-            // 메인 페이지에 이벤트만 발송 (자막 표시창 없음)
+            // 메인 페이지에 이벤트 발송
             const event = new CustomEvent('subtitleExtracted', {
                 detail: {
-                    text: subtitleText,
+                    text: normalizedResult.text,
+                    segments: normalizedResult.segments,
                     fullResult: result,
                     method: this.selectedMethod
                 }
             });
             window.parent.dispatchEvent(event);
-            console.log('📤 자막 추출 완료 - 전문 편집기에서 표시됩니다');
+            console.log('📤 자막 추출 완료 - 전문 편집기에서 표시됩니다', normalizedResult);
+            
+            // AI 어시스턴트로 자막 내용 전송
+            if (window.sendSubtitlesToAI) {
+                console.log('🤖 AI 어시스턴트로 자막 전송 중...');
+                window.sendSubtitlesToAI(normalizedResult).then(response => {
+                    console.log('✅ AI가 자막을 파악했습니다');
+                }).catch(error => {
+                    console.error('❌ AI 자막 전송 실패:', error);
+                });
+            }
         } catch (error) {
             console.error('❌ 이벤트 발송 실패:', error);
         }

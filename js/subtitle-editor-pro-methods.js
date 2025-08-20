@@ -7,26 +7,36 @@
     SubtitleEditorPro.prototype.attachEventListeners = function() {
         // 자막 추출 완료 이벤트 리스너
         window.addEventListener('subtitleExtracted', (event) => {
-            console.log('🎬 SubtitleEditorPro: 자막 추출 완료 이벤트 수신');
+            console.log('🎬 SubtitleEditorPro: 자막 추출 완료 이벤트 수신', event.detail);
             
-            if (event.detail && event.detail.fullResult) {
-                const result = event.detail.fullResult;
+            if (event.detail) {
                 let segments = [];
                 
-                // segments 추출
-                if (result.segments && Array.isArray(result.segments)) {
-                    segments = result.segments.map(s => ({
-                        start: Math.max(0, Math.round(Number(s.start)||0)),
-                        end: Math.max(0, Math.round(Number(s.end)||0)),
-                        text: String(s.text||'').trim(),
+                // 이미 정규화된 segments 사용
+                if (event.detail.segments && Array.isArray(event.detail.segments)) {
+                    segments = event.detail.segments.map(s => ({
+                        start: Math.max(0, Number(s.start) || 0),
+                        end: Math.max(0, Number(s.end) || 0),
+                        text: String(s.text || '').trim(),
                         speaker: s.speaker || ''
                     }));
-                } else if (result.text) {
-                    // 단순 텍스트만 있는 경우
+                } else if (event.detail.fullResult) {
+                    // 구버전 호환성 유지
+                    const result = event.detail.fullResult;
+                    if (result.segments && Array.isArray(result.segments)) {
+                        segments = result.segments.map(s => ({
+                            start: Math.max(0, Number(s.start) || 0),
+                            end: Math.max(0, Number(s.end) || 0),
+                            text: String(s.text || '').trim(),
+                            speaker: s.speaker || ''
+                        }));
+                    }
+                } else if (event.detail.text) {
+                    // 텍스트만 있는 경우
                     segments = [{
                         start: 0,
                         end: 60,
-                        text: result.text,
+                        text: event.detail.text,
                         speaker: ''
                     }];
                 }

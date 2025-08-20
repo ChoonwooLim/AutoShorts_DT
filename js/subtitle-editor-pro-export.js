@@ -225,6 +225,23 @@
                 
                 document.getElementById('statusMessage').textContent = `${file.name} 파일을 성공적으로 가져왔습니다.`;
                 
+                // AI 어시스턴트로 자막 내용 전송
+                if (window.sendSubtitlesToAI) {
+                    console.log('🤖 가져온 자막을 AI 어시스턴트로 전송 중...');
+                    const subtitleData = {
+                        text: subtitles.map(s => s.text).join(' '),
+                        segments: subtitles,
+                        method: 'import',
+                        fileName: file.name
+                    };
+                    
+                    window.sendSubtitlesToAI(subtitleData).then(response => {
+                        console.log('✅ AI가 자막 파일을 파악했습니다');
+                    }).catch(error => {
+                        console.error('❌ AI 자막 전송 실패:', error);
+                    });
+                }
+                
             } catch (error) {
                 console.error('Import error:', error);
                 alert(`파일 가져오기 실패: ${error.message}`);
