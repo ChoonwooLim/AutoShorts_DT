@@ -519,8 +519,8 @@ ipcMain.handle('ffmpeg:transcode', async (event, params) => {
   });
 });
 
-ipcMain.handle('audio:extract', async (event, params) => {
-  const { videoPath, quality = 'medium' } = params;
+// Common audio extraction function
+async function extractAudio(videoPath, quality = 'medium') {
   const tempOutput = path.join(app.getPath('temp'), `audio_${Date.now()}.mp3`);
 
   const qualitySettings = {
@@ -565,15 +565,16 @@ ipcMain.handle('audio:extract', async (event, params) => {
 
     ffmpeg.on('error', reject);
   });
+}
+
+ipcMain.handle('audio:extract', async (event, params) => {
+  const { videoPath, quality = 'medium' } = params;
+  return extractAudio(videoPath, quality);
 });
 
 ipcMain.handle('audio:extract-from-path', async (event, params) => {
   const { filePath, quality = 'medium' } = params;
-  const result = await ipcMain.handle('audio:extract', event, { 
-    videoPath: filePath, 
-    quality 
-  });
-  return result;
+  return extractAudio(filePath, quality);
 });
 
 ipcMain.handle('file:save-to-temp', async (event, params) => {

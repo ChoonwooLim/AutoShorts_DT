@@ -1469,7 +1469,7 @@ Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
                 result.segments.forEach(segment => {
                     const startTime = this.formatTime(segment.start);
                     const endTime = this.formatTime(segment.end);
-                    const text = String(segment.text || '');
+                    const text = segment.text || '';
                     
                     // 음표가 아닌 실제 내용이 있는지 확인
                     if (text && text.trim() && !text.match(/^[♪♫♬]+$/)) {
@@ -1492,7 +1492,7 @@ Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
                     </div>` + html;
                 }
             } else {
-                const text = String(result.text || result || '');
+                const text = result.text || result || '';
                 // 단순 텍스트 - 음표만 있는지 확인
                 if (text.match(/^[♪♫♬\s]*$/)) {
                     html = `<div style="background: #ff9800; color: white; padding: 10px; border-radius: 4px;">
@@ -1539,16 +1539,15 @@ Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
                         wordCount++;
                         
                         // 세그먼트 분리 조건 - 30자 제한 및 단어 수 제한
-                        const wordText = String(word.text || '');
                         const shouldSplit = 
                             // 25자 이상이면 무조건 분리
                             currentSegment.text.length >= 25 ||
                             // 5단어 이상이면 분리
                             wordCount >= 5 ||
                             // 문장 끝 (마침표, 느낌표, 물음표)
-                            (wordText.match(/[.!?]$/) && currentSegment.text.length > 10) ||
+                            (word.text.match(/[.!?]$/) && currentSegment.text.length > 10) ||
                             // 쉼표 뒤이고 15자 이상
-                            (wordText.match(/,$/) && currentSegment.text.length > 15) ||
+                            (word.text.match(/,$/) && currentSegment.text.length > 15) ||
                             // 시간이 2.5초 이상
                             (currentSegment.end - currentSegment.start) > 2500;
                             
