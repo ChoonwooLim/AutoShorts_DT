@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import handler from 'serve-handler';
 import { ipcMain } from 'electron';
-import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { spawn } from 'node:child_process';
 import { initializeCache, getCachedOutputPath, hasCache, writeCacheFromTemp } from './cache.js';
 import { detectHardwareEncoders, pickBestH264Encoder, buildTranscodeArgs, parseFfmpegProgress } from './ffmpeg-utils.js';
@@ -19,6 +19,35 @@ import FormData from 'form-data';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production';
 const rendererUrl = process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL;
+
+// FFmpeg 경로 설정
+let ffmpegPath;
+function setupFfmpegPath() {
+  if (app.isPackaged) {
+    // 패키징된 앱인 경우, unpacked 리소스에서 ffmpeg 찾기
+    const unpackedPath = path.join(
+      process.resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      '@ffmpeg-installer',
+      process.platform === 'win32' ? 'win32-x64' : process.platform,
+      process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+    );
+    
+    if (fs.existsSync(unpackedPath)) {
+      ffmpegPath = unpackedPath;
+    } else {
+      // unpacked에 없으면 ffmpeg-installer의 경로 사용
+      ffmpegPath = ffmpegInstaller.path;
+    }
+  } else {
+    // 개발 환경에서는 ffmpeg-installer의 경로 사용
+    ffmpegPath = ffmpegInstaller.path;
+  }
+  
+  console.log(`🔧 FFmpeg 경로 설정: ${ffmpegPath}`);
+  return ffmpegPath;
+}
 
 // 개발 모드에서 Vite https 인증서 무시
 if (isDev) {
@@ -496,6 +525,9 @@ async function startProxyServer() {
 
 // file 스킴에서 CORS/리소스 접근 이슈를 줄이기 위한 등록
 app.whenReady().then(async () => {
+  // FFmpeg 경로 초기화
+  setupFfmpegPath();
+  
   initializeCache(app.getPath('userData'));
   
   // 프록시 서버 시작

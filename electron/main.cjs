@@ -7,7 +7,36 @@ const { spawn } = require('node:child_process');
 const crypto = require('crypto');
 
 // FFmpeg 관련
-const { path: ffmpegPath } = require('@ffmpeg-installer/ffmpeg');
+const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+let ffmpegPath = ffmpegInstaller.path;
+
+// FFmpeg 경로 설정 함수
+function setupFfmpegPath() {
+  if (app.isPackaged) {
+    // 패키징된 앱인 경우, unpacked 리소스에서 ffmpeg 찾기
+    const unpackedPath = path.join(
+      process.resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      '@ffmpeg-installer',
+      process.platform === 'win32' ? 'win32-x64' : process.platform,
+      process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+    );
+    
+    if (fs.existsSync(unpackedPath)) {
+      ffmpegPath = unpackedPath;
+    } else {
+      // unpacked에 없으면 ffmpeg-installer의 경로 사용
+      ffmpegPath = ffmpegInstaller.path;
+    }
+  } else {
+    // 개발 환경에서는 ffmpeg-installer의 경로 사용
+    ffmpegPath = ffmpegInstaller.path;
+  }
+  
+  console.log(`🔧 FFmpeg 경로 설정: ${ffmpegPath}`);
+  return ffmpegPath;
+}
 
 // Express 관련
 const express = require('express');
@@ -373,9 +402,16 @@ async function startProxyServer() {
 
   const upload = multer({ storage: multer.memoryStorage() });
 
-  // OpenAI Whisper 프록시
-  app.post('/proxy/openai/whisper', upload.single('file'), async (req, res) => {
+  // OpenAI Whisper 프록시 - 여러 경로 지원
+  const whisperHandler = async (req, res) => {
     try {
+      // API 키를 헤더 또는 body에서 가져오기
+      const apiKey = req.headers['authorization']?.replace('Bearer ', '') || req.body.apiKey;
+      
+      if (!apiKey) {
+        return res.status(401).json({ error: 'API key is required' });
+      }
+      
       const formData = new FormData();
       formData.append('file', req.file.buffer, {
         filename: req.file.originalname,
@@ -391,7 +427,7 @@ async function startProxyServer() {
         {
           headers: {
             ...formData.getHeaders(),
-            'Authorization': `Bearer ${req.body.apiKey}`
+            'Authorization': `Bearer ${apiKey}`
           },
           maxBodyLength: Infinity
         }
@@ -404,9 +440,13 @@ async function startProxyServer() {
         error: error.message
       });
     }
-  });
+  };
+  
+  // 여러 경로에서 동일한 핸들러 사용
+  app.post('/proxy/openai/whisper', upload.single('file'), whisperHandler);
+  app.post('/api/openai/transcriptions', upload.single('file'), whisperHandler);
 
-  proxyPort = await findAvailablePort([5001, 5002, 5003]);
+  proxyPort = await findAvailablePort([3001, 3002, 3003]);
   proxyServer = app.listen(proxyPort, () => {
     console.log(`Proxy server running on port ${proxyPort}`);
   });
@@ -670,6 +710,9 @@ ipcMain.handle('stt:openai', async (event, { bytes, language, apiKey }) => {
 // 앱 초기화
 if (app) {
   app.whenReady().then(async () => {
+  // FFmpeg 경로 초기화
+  setupFfmpegPath();
+  
   // 캐시/유저 데이터 경로 설정
   diskCacheDir = path.join(app.getPath('temp'), 'AutoShortsCache');
   app.commandLine.appendSwitch('disk-cache-dir', diskCacheDir);

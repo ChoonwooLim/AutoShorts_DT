@@ -1050,7 +1050,13 @@ class TranscriptionModal {
                         });
                         
                         if (result && result.success) {
-                            const binaryString = atob(result.audioData);
+                            // result.data 또는 result.audioData 체크
+                            const base64Data = result.data || result.audioData;
+                            if (!base64Data) {
+                                console.error('❌ 오디오 데이터가 없습니다:', result);
+                                throw new Error('오디오 데이터가 반환되지 않았습니다');
+                            }
+                            const binaryString = atob(base64Data);
                             const bytes = new Uint8Array(binaryString.length);
                             for (let i = 0; i < binaryString.length; i++) {
                                 bytes[i] = binaryString.charCodeAt(i);
@@ -1492,9 +1498,11 @@ Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
                     </div>` + html;
                 }
             } else {
-                const text = String(result.text || result || '');
+                // result.text가 undefined이거나 null인 경우도 안전하게 처리
+                const rawText = result.text || result || '';
+                const text = typeof rawText === 'string' ? rawText : String(rawText);
                 // 단순 텍스트 - 음표만 있는지 확인
-                if (text.match(/^[♪♫♬\s]*$/)) {
+                if (text && text.match && text.match(/^[♪♫♬\s]*$/)) {
                     html = `<div style="background: #ff9800; color: white; padding: 10px; border-radius: 4px;">
                         ⚠️ 음성이 감지되지 않았습니다. 비디오에 대화/나레이션이 있는지 확인해주세요.
                     </div>`;
