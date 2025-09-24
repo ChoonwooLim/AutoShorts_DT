@@ -7,7 +7,36 @@ const { spawn } = require('node:child_process');
 const crypto = require('crypto');
 
 // FFmpeg 관련
-const { path: ffmpegPath } = require('@ffmpeg-installer/ffmpeg');
+const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+let ffmpegPath = ffmpegInstaller.path;
+
+// FFmpeg 경로 설정 함수
+function setupFfmpegPath() {
+  if (app.isPackaged) {
+    // 패키징된 앱인 경우, unpacked 리소스에서 ffmpeg 찾기
+    const unpackedPath = path.join(
+      process.resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      '@ffmpeg-installer',
+      process.platform === 'win32' ? 'win32-x64' : process.platform,
+      process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+    );
+    
+    if (fs.existsSync(unpackedPath)) {
+      ffmpegPath = unpackedPath;
+    } else {
+      // unpacked에 없으면 ffmpeg-installer의 경로 사용
+      ffmpegPath = ffmpegInstaller.path;
+    }
+  } else {
+    // 개발 환경에서는 ffmpeg-installer의 경로 사용
+    ffmpegPath = ffmpegInstaller.path;
+  }
+  
+  console.log(`🔧 FFmpeg 경로 설정: ${ffmpegPath}`);
+  return ffmpegPath;
+}
 
 // Express 관련
 const express = require('express');
@@ -574,8 +603,8 @@ ipcMain.handle('ffmpeg:transcode', async (event, params) => {
   });
 });
 
-ipcMain.handle('audio:extract', async (event, params) => {
-  const { videoPath, quality = 'medium' } = params;
+// Common audio extraction function
+async function extractAudio(videoPath, quality = 'medium') {
   const tempOutput = path.join(app.getPath('temp'), `audio_${Date.now()}.opus`);
 
   const qualitySettings = {
@@ -640,72 +669,12 @@ ipcMain.handle('audio:extract', async (event, params) => {
 
     ffmpeg.on('error', reject);
   });
-});
-
-// 공통 extractAudio 함수로 분리
-async function extractAudio(videoPath, quality = 'medium') {
-  const tempOutput = path.join(app.getPath('temp'), `audio_${Date.now()}.opus`);
-
-  const qualitySettings = {
-    low: { bitrate: '16k', sampleRate: 8000 },
-    medium: { bitrate: '24k', sampleRate: 16000 },
-    high: { bitrate: '32k', sampleRate: 16000 }
-  };
-
-  const settings = qualitySettings[quality] || qualitySettings.medium;
-
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-i', videoPath,
-      '-vn',
-      '-af', 'afftdn=nf=-25,highpass=f=300,lowpass=f=3000',
-      '-acodec', 'libopus',
-      '-b:a', settings.bitrate,
-      '-ar', settings.sampleRate,
-      '-ac', '1',
-      '-application', 'voip',
-      tempOutput
-    ];
-
-    const ffmpeg = spawn(ffmpegPath, args);
-    let errorOutput = '';
-
-    ffmpeg.stderr.on('data', (data) => {
-      errorOutput += data.toString();
-    });
-
-    ffmpeg.on('close', (code) => {
-      if (code === 0 && fs.existsSync(tempOutput)) {
-        const stats = fs.statSync(tempOutput);
-        const sizeMB = stats.size / (1024 * 1024);
-        console.log(`✅ 오디오 추출 완료: ${sizeMB.toFixed(2)}MB`);
-        
-        if (stats.size <= 10 * 1024 * 1024) {
-          const buffer = fs.readFileSync(tempOutput);
-          fs.unlinkSync(tempOutput);
-          resolve({ 
-            success: true, 
-            data: buffer.toString('base64'),
-            size: stats.size,
-            format: 'base64'
-          });
-        } else {
-          resolve({ 
-            success: true, 
-            filePath: tempOutput,
-            size: stats.size,
-            format: 'file',
-            needsChunking: stats.size > 20 * 1024 * 1024
-          });
-        }
-      } else {
-        reject(new Error(`FFmpeg failed: ${errorOutput}`));
-      }
-    });
-
-    ffmpeg.on('error', reject);
-  });
 }
+
+ipcMain.handle('audio:extract', async (event, params) => {
+  const { videoPath, quality = 'medium' } = params;
+  return extractAudio(videoPath, quality);
+});
 
 ipcMain.handle('audio:extract-from-path', async (event, params) => {
   const { filePath, quality = 'medium' } = params;
@@ -773,6 +742,7 @@ ipcMain.handle('audio:chunk', async (event, params) => {
     console.error('❌ Chunking failed:', error);
     return { success: false, error: error.message };
   }
+
 });
 
 ipcMain.handle('file:save-to-temp', async (event, params) => {
@@ -868,6 +838,9 @@ ipcMain.handle('stt:openai', async (event, { bytes, language, apiKey }) => {
 // 앱 초기화
 if (app) {
   app.whenReady().then(async () => {
+  // FFmpeg 경로 초기화
+  setupFfmpegPath();
+  
   // 캐시/유저 데이터 경로 설정
   diskCacheDir = path.join(app.getPath('temp'), 'AutoShortsCache');
   app.commandLine.appendSwitch('disk-cache-dir', diskCacheDir);

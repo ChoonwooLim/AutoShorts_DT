@@ -915,46 +915,55 @@ class TranscriptionModal {
                     const proxyPort = window.electronAPI && window.electronAPI.getProxyPort 
                         ? await window.electronAPI.getProxyPort() 
                         : 3003;
-                    proxyUrl = `http://localhost:${proxyPort}`;
+                    proxyUrl = `http://localhost:${proxyPort}/api`;
                 } else if (window.location.hostname === 'localhost') {
-                    proxyUrl = 'http://localhost:3001';
+                    proxyUrl = 'http://localhost:3001/api';
                 } else {
-                    proxyUrl = '';
+                    proxyUrl = '/api';
                 }
                 
-                // apiKey를 FormData에 추가 (Electron 프록시 요구사항)
-                const apiKey = await this.getApiKey('openai');
-
-            const cloneFormData = (source) => {
-                const copy = new FormData();
-                source.forEach((value, key) => {
-                    copy.append(key, value);
-                });
-                return copy;
-            };
-
-            const buildRequestOptions = (includeApiKey) => {
-                const payload = cloneFormData(formData);
-                if (includeApiKey) {
-                    payload.append('apiKey', apiKey);
-                }
-                return {
+                const response = await fetch(`${proxyUrl}/openai/transcriptions`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${apiKey}`
+                        'Authorization': `Bearer ${await this.getApiKey('openai')}`
                     },
-                    body: payload
-                };
-            };
-
-            let response = await fetch(`${proxyUrl}/proxy/openai/whisper`, buildRequestOptions(true));
-
-            if (response.status === 404) {
-                console.warn('⚠️ Whisper proxy route missing. Falling back to /api/openai/transcriptions');
-                response = await fetch(`${proxyUrl}/api/openai/transcriptions`, buildRequestOptions(false));
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    console.error(`❌ 세그먼트 ${segmentNum} 처리 실패`);
+                    continue;
+                }
+                
+                const result = await response.json();
+                
+                // 세그먼트 타임스탬프 조정
+                if (result.segments) {
+                    const estimatedDuration = (audioData.size / totalSize) * 1200; // 전체 예상 시간 (초)
+                    const segmentDuration = estimatedDuration / segmentCount;
+                    const timeOffset = i * segmentDuration;
+                    
+                    result.segments = result.segments.map(seg => ({
+                        ...seg,
+                        start: (seg.start || 0) + timeOffset,
+                        end: (seg.end || 0) + timeOffset
+                    }));
+                    
+                    allSegments.push(...result.segments);
+                    lastEndTime = result.segments[result.segments.length - 1]?.end || lastEndTime;
+                } else {
+                    // 단순 텍스트인 경우
+                    allSegments.push({
+                        text: result.text || result,
+                        start: lastEndTime,
+                        end: lastEndTime + 60
+                    });
+                    lastEndTime += 60;
+                }
+                
+            } catch (error) {
+                console.error(`❌ 세그먼트 ${segmentNum} 처리 중 오류:`, error);
             }
-<<<<<<< HEAD
-=======
         }
         
         // 모든 세그먼트 병합
@@ -1041,13 +1050,7 @@ class TranscriptionModal {
                         });
                         
                         if (result && result.success) {
-                            // result.data 또는 result.audioData 체크
-                            const base64Data = result.data || result.audioData;
-                            if (!base64Data) {
-                                console.error('❌ 오디오 데이터가 없습니다:', result);
-                                throw new Error('오디오 데이터가 반환되지 않았습니다');
-                            }
-                            const binaryString = atob(base64Data);
+                            const binaryString = atob(result.audioData);
                             const bytes = new Uint8Array(binaryString.length);
                             for (let i = 0; i < binaryString.length; i++) {
                                 bytes[i] = binaryString.charCodeAt(i);
@@ -1220,7 +1223,6 @@ class TranscriptionModal {
                 },
                 body: formData
             });
->>>>>>> 5b647801bc68d78a7edd6d139cc2ff83afb6b9b6
 
             if (!response.ok) {
                 const errorData = await response.text();
@@ -1231,12 +1233,11 @@ class TranscriptionModal {
             return await response.json();
         } else {
             // 전사 엔드포인트 사용 (프록시 경유)
-            // apiKey를 FormData에 추가 (Electron 프록시 요구사항)
-            const apiKey = await this.getApiKey('openai');
-            formData.append('apiKey', apiKey);
-            
-            const response = await fetch(`${proxyUrl}/proxy/openai/whisper`, {
+            const response = await fetch(`${proxyUrl}/openai/transcriptions`, {
                 method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${await this.getApiKey('openai')}`
+                },
                 body: formData
             });
 
@@ -1468,7 +1469,7 @@ Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
                 result.segments.forEach(segment => {
                     const startTime = this.formatTime(segment.start);
                     const endTime = this.formatTime(segment.end);
-                    const text = String(segment.text || '');
+                    const text = segment.text || '';
                     
                     // 음표가 아닌 실제 내용이 있는지 확인
                     if (text && text.trim() && !text.match(/^[♪♫♬]+$/)) {
@@ -1491,11 +1492,9 @@ Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
                     </div>` + html;
                 }
             } else {
-                // result.text가 undefined이거나 null인 경우도 안전하게 처리
-                const rawText = result.text || result || '';
-                const text = typeof rawText === 'string' ? rawText : String(rawText);
+                const text = result.text || result || '';
                 // 단순 텍스트 - 음표만 있는지 확인
-                if (text && text.match && text.match(/^[♪♫♬\s]*$/)) {
+                if (text.match(/^[♪♫♬\s]*$/)) {
                     html = `<div style="background: #ff9800; color: white; padding: 10px; border-radius: 4px;">
                         ⚠️ 음성이 감지되지 않았습니다. 비디오에 대화/나레이션이 있는지 확인해주세요.
                     </div>`;
@@ -1540,16 +1539,15 @@ Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
                         wordCount++;
                         
                         // 세그먼트 분리 조건 - 30자 제한 및 단어 수 제한
-                        const wordText = String(word.text || '');
                         const shouldSplit = 
                             // 25자 이상이면 무조건 분리
                             currentSegment.text.length >= 25 ||
                             // 5단어 이상이면 분리
                             wordCount >= 5 ||
                             // 문장 끝 (마침표, 느낌표, 물음표)
-                            (wordText.match(/[.!?]$/) && currentSegment.text.length > 10) ||
+                            (word.text.match(/[.!?]$/) && currentSegment.text.length > 10) ||
                             // 쉼표 뒤이고 15자 이상
-                            (wordText.match(/,$/) && currentSegment.text.length > 15) ||
+                            (word.text.match(/,$/) && currentSegment.text.length > 15) ||
                             // 시간이 2.5초 이상
                             (currentSegment.end - currentSegment.start) > 2500;
                             
