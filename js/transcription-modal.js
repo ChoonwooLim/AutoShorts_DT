@@ -1052,7 +1052,7 @@ class TranscriptionModal {
                             for (let i = 0; i < binaryString.length; i++) {
                                 bytes[i] = binaryString.charCodeAt(i);
                             }
-                            const audioBlob = new Blob([bytes], { type: 'audio/mp3' });
+                            const audioBlob = new Blob([bytes], { type: 'audio/ogg' });
                             console.log('✅ 대용량 파일 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
                             return audioBlob;
                         } else if (result && result.error) {
@@ -1093,7 +1093,7 @@ class TranscriptionModal {
                         for (let i = 0; i < binaryString.length; i++) {
                             bytes[i] = binaryString.charCodeAt(i);
                         }
-                        const audioBlob = new Blob([bytes], { type: 'audio/mp3' });
+                        const audioBlob = new Blob([bytes], { type: 'audio/ogg' });
                         console.log('✅ 네이티브 FFmpeg로 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
                         return audioBlob;
                     }
@@ -1351,102 +1351,123 @@ class TranscriptionModal {
     }
 
     async transcribeWithGoogle(audioData) {
-        this.updateProgress(30, 'Gemini로 처리 중...', '음성 데이터를 분석하고 있습니다.');
+        this.updateProgress(30, 'Google STT 처리 중...', '음성을 분석하고 있습니다.');
 
         try {
-            // Gemini API를 사용한 음성 인식
             const googleKey = await this.getApiKey('google');
-            
-            // 오디오를 base64로 인코딩
-            const reader = new FileReader();
-            const audioBase64 = await new Promise((resolve) => {
-                reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                reader.readAsDataURL(audioData);
-            });
 
-            // Gemini API로 음성 텍스트 변환 요청
-            const language = document.getElementById('googleLanguage').value;
-            const languageMap = {
-                'en-US': 'English',
-                'ko-KR': 'Korean',
-                'ja-JP': 'Japanese',
-                'zh-CN': 'Chinese'
+            if (!googleKey) {
+                throw new Error('Google API 키가 설정되지 않았습니다.');
+            }
+
+            const qualitySelect = document.getElementById('audioQuality');
+            const quality = qualitySelect ? qualitySelect.value : 'medium';
+            const sampleRateMap = {
+                low: 8000,
+                medium: 16000,
+                high: 16000
             };
-            
-            const prompt = `Please transcribe the following audio to text in ${languageMap[language] || 'English'}. 
-                           If there are multiple speakers, indicate them. 
-                           Provide timestamps if possible.
-                           Return ONLY the transcription without any additional explanation.`;
+            const sampleRate = sampleRateMap[quality] || 16000;
 
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleKey}`, {
+            const language = document.getElementById('googleLanguage').value || 'en-US';
+
+            const arrayBuffer = await audioData.arrayBuffer();
+            const base64Audio = this.arrayBufferToBase64(arrayBuffer);
+            const audioSizeMB = (base64Audio.length * 0.75) / (1024 * 1024);
+
+            console.log(`🎧 Google STT 요청 준비: ${audioSizeMB.toFixed(2)}MB, 샘플레이트 ${sampleRate}Hz`);
+
+            const model = audioSizeMB > 1.5 ? 'latest_long' : 'latest_short';
+
+            const requestBody = {
+                config: {
+                    encoding: 'OGG_OPUS',
+                    sampleRateHertz: sampleRate,
+                    languageCode: language,
+                    enableAutomaticPunctuation: true,
+                    model: model,
+                    audioChannelCount: 1,
+                    enableSeparateRecognitionPerChannel: false,
+                    maxAlternatives: 1,
+                    enableWordTimeOffsets: true
+                },
+                audio: { content: base64Audio }
+            };
+
+            let proxyUrl = '';
+            if (window.env && window.env.isElectron) {
+                const proxyPort = window.electronAPI && window.electronAPI.getProxyPort
+                    ? await window.electronAPI.getProxyPort()
+                    : 3003;
+                proxyUrl = `http://localhost:${proxyPort}`;
+                console.log(`🔗 Using Electron proxy on port ${proxyPort}`);
+            } else if (window.location.hostname === 'localhost') {
+                proxyUrl = 'http://localhost:3001';
+            }
+
+            const endpoint = `${proxyUrl}/api/google/speech?key=${googleKey}`;
+
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Accept': 'application/json'
                 },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [
-                            { text: prompt },
-                            {
-                                inline_data: {
-                                    mime_type: 'audio/webm',
-                                    data: audioBase64
-                                }
-                            }
-                        ]
-                    }]
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
-                const errorData = await response.text();
-                console.error('🔴 Gemini API 오류:', errorData);
-                
-                // Speech-to-Text API 활성화 안내
-                if (response.status === 403 || response.status === 400) {
-                    throw new Error(`Gemini API 오류: 오디오 파일이 너무 크거나 지원되지 않는 형식입니다.\n\n대안:\n1. OpenAI Whisper 사용 (권장)\n2. AssemblyAI 사용\n3. 더 짧은 구간 선택`);
+                const errorText = await response.text();
+                console.error('🔴 Google STT 응답 오류:', errorText);
+
+                if (response.status === 400 && errorText.includes('payload size exceeds')) {
+                    throw new Error(`Google STT 요청이 너무 큽니다. (전송 크기: ${audioSizeMB.toFixed(2)}MB)
+
+대안:
+1. OpenAI Whisper 사용 (권장)
+2. 더 짧은 구간만 선택
+3. 영상 해상도나 길이를 줄여 업로드`);
                 }
-                throw new Error(`Gemini API 오류 (${response.status}): ${response.statusText}`);
+
+                if (response.status === 401) {
+                    throw new Error('Google API 키가 유효하지 않습니다. API 설정을 확인해주세요.');
+                }
+
+                throw new Error(`Google STT API 오류 (${response.status}): ${response.statusText}`);
             }
 
             const data = await response.json();
-            
-            // Gemini 응답을 Google Speech-to-Text 형식으로 변환
-            const transcription = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            
-            // 결과를 표준 형식으로 변환
-            const result = {
-                results: [{
-                    alternatives: [{
-                        transcript: transcription,
-                        confidence: 0.9
-                    }]
-                }]
-            };
 
-            this.updateProgress(100, '완료!', 'Gemini 처리 완료');
-            return result;
+            if (!data.results || !data.results.length) {
+                console.warn('⚠️ Google STT 응답에 결과가 없습니다.', data);
+            }
+
+            this.updateProgress(100, '완료!', 'Google STT 처리 완료');
+            return data;
 
         } catch (error) {
-            console.error('🔴 Gemini 음성 인식 실패:', error);
-            
-            // 대체 안내 메시지
+            console.error('🔴 Google STT 처리 실패:', error);
+
             const fallbackMessage = `
-Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
+Google Speech-to-Text API 사용 중 문제가 발생했습니다.
 
-1. Google Cloud Console에서 Speech-to-Text API 활성화
-   https://console.cloud.google.com/apis/api/speech.googleapis.com
-
-2. 또는 다른 서비스 사용:
-   - OpenAI Whisper (권장) ✅
-   - AssemblyAI ✅
-
-현재는 Gemini API로 대체 시도했으나 오디오 처리에 제한이 있을 수 있습니다.
-            `;
-            
+확인 사항:
+1. Google Cloud Console에서 Speech-to-Text API가 활성화되었는지 확인
+2. API 키에 올바른 권한이 있는지 확인
+3. 긴 영상이라면 OpenAI Whisper 또는 AssemblyAI 사용 고려`;
             console.log(fallbackMessage);
             throw error;
         }
+    }
+    arrayBufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        const chunkSize = 0x2000;
+        const chunks = [];
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            chunks.push(String.fromCharCode.apply(null, chunk));
+        }
+        return btoa(chunks.join(''));
     }
 
     displayResults(result) {
@@ -1611,8 +1632,14 @@ Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
                                 currentSentence = '';
                             }
                         });
-                    } else {
-                        html += `<div>${alternative.transcript}</div>`;
+                    } else if (alternative.transcript) {
+                        const sentences = alternative.transcript.match(/[^.!?]+[.!?]+/g) || [alternative.transcript];
+                        sentences.forEach((sentence, index) => {
+                            html += `<div class="timestamp-line">
+                                <span class="timestamp">[${(index + 1).toString().padStart(2, '0')}]</span>
+                                <span>${sentence.trim()}</span>
+                            </div>`;
+                        });
                     }
                 });
             }
@@ -1769,6 +1796,25 @@ Google Speech-to-Text API를 사용하려면 다음 단계가 필요합니다:
                     }
                     normalizedResult.text += r.alternatives[0].transcript + ' ';
                 });
+
+                normalizedResult.text = normalizedResult.text.trim();
+
+                if (!normalizedResult.segments.length && normalizedResult.text) {
+                    const sentences = normalizedResult.text.match(/[^.!?]+[.!?]+/g) || [normalizedResult.text];
+                    let approximateTime = 0;
+                    sentences.forEach((sentence) => {
+                        const cleanSentence = sentence.trim();
+                        if (!cleanSentence) {
+                            return;
+                        }
+                        normalizedResult.segments.push({
+                            start: approximateTime,
+                            end: approximateTime + 3,
+                            text: cleanSentence
+                        });
+                        approximateTime += 3;
+                    });
+                }
             }
             
             // 메인 페이지에 이벤트 발송

@@ -487,6 +487,30 @@ async function startProxyServer() {
     const apiKey = extractApiKey(req.headers['authorization']) || req.body.apiKey;
     await forwardToOpenAIWhisper(req, res, apiKey);
   });
+  app.post('/api/google/speech', async (req, res) => {
+    try {
+      const apiKey = req.query.key || req.body.apiKey;
+
+      if (!apiKey) {
+        return res.status(401).json({ error: 'API key is required' });
+      }
+
+      const response = await axios.post(
+        `https://speech.googleapis.com/v1/speech:recognize?key=${apiKey}`,
+        req.body,
+        {
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+
+      res.json(response.data);
+    } catch (error) {
+      const status = error.response?.status || 500;
+      const payload = error.response?.data || { error: error.message };
+      console.error('Google Speech proxy error:', error.message);
+      res.status(status).json(payload);
+    }
+  });
   proxyPort = await findAvailablePort([5001, 5002, 5003]);
   proxyServer = app.listen(proxyPort, () => {
     console.log(`Proxy server running on port ${proxyPort}`);
