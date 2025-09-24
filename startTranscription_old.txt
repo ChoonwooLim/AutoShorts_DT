@@ -1,0 +1,138 @@
+    async startTranscription() {
+        if (!this.currentFile) {
+            alert('영상 파일을 먼저 업로드해주세요.');
+            return;
+        }
+
+        // FFmpeg 로드 확인 및 초기화
+        if (!window.ffmpeg || !window.ffmpeg.isLoaded) {
+            console.log('📦 FFmpeg.wasm 로딩 중...');
+            this.updateProgress(5, 'FFmpeg 초기화 중...', '오디오 추출 준비 중입니다.');
+            
+            // FFmpeg 로드 시도
+            if (window.loadFFmpeg) {
+                try {
+                    await window.loadFFmpeg();
+                    console.log('✅ FFmpeg.wasm 로드 완료');
+                } catch (error) {
+                    console.warn('⚠️ FFmpeg.wasm 로드 실패, 대체 방법 사용:', error);
+                }
+            }
+        }
+
+        // API 키 확인
+        let apiKey;
+        let providerName;
+        
+        switch(this.selectedMethod) {
+            case 'whisper':
+                apiKey = await this.getApiKey('whisper');
+                providerName = 'OpenAI';
+                break;
+            case 'assemblyai':
+                apiKey = await this.getApiKey('assemblyai');
+                providerName = 'AssemblyAI';
+                break;
+            case 'google':
+                apiKey = await this.getApiKey('google');
+                providerName = 'Google';
+                break;
+        }
+        
+        if (!apiKey) {
+            let message = `${providerName} API 키가 설정되지 않았습니다.\n\n⚙️ API 키 설정 버튼을 클릭하여 키를 입력해주세요.`;
+            
+            // 각 서비스별 추가 안내
+            if (this.selectedMethod === 'google') {
+                message += '\n\n💡 팁: Google STT는 Gemini API 키를 사용합니다.';
+            } else if (this.selectedMethod === 'whisper') {
+                message += '\n\n💡 팁: OpenAI Whisper는 GPT API 키를 사용합니다.';
+            }
+            
+            alert(message);
+            // API 설정 모달 열기
+            document.getElementById('apiSettingsBtn')?.click();
+            return;
+        }
+
+        this.isProcessing = true;
+        document.getElementById('startTranscription').disabled = true;
+        document.getElementById('startTranscription').querySelector('.btn-text').textContent = '처리 중...';
+        document.getElementById('cancelTranscription').style.display = 'block';
+
+        try {
+            // 오디오 추출
+            this.updateProgress(10, '오디오 추출 중...', '영상에서 음성 데이터를 추출하고 있습니다.');
+            const audioData = await this.extractAudio(this.currentFile);
+
+            // 선택된 방식에 따라 처리
+            let result;
+            switch (this.selectedMethod) {
+                case 'whisper':
+                    result = await this.transcribeWithWhisper(audioData);
+                    break;
+                case 'assemblyai':
+                    result = await this.transcribeWithAssemblyAI(audioData);
+                    break;
+                case 'google':
+                    result = await this.transcribeWithGoogle(audioData);
+                    break;
+            }
+
+            // 결과 표시
+            this.displayResults(result);
+
+        } catch (error) {
+            console.error('🔴 자막 추출 실패:', error);
+            
+            // 오류 상세 정보 표시
+            let errorMessage = '자막 추출 중 오류가 발생했습니다.\n\n';
+            
+            // 오류 유형별 안내
+            if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                errorMessage += '❌ 네트워크 오류\n';
+                errorMessage += '인터넷 연결을 확인하거나 API 서비스 상태를 확인해주세요.\n';
+                errorMessage += '브라우저 CORS 정책으로 인해 일부 API가 차단될 수 있습니다.\n\n';
+            } else if (error.message.includes('CORS') || error.message.includes('Cross-Origin')) {
+                errorMessage += '🔒 CORS 오류\n';
+                errorMessage += '브라우저 보안 정책으로 인해 직접 API 호출이 차단되었습니다.\n';
+                errorMessage += '프록시 서버를 사용하거나 백엔드 서버를 통해 호출해야 합니다.\n\n';
+            } else if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+                errorMessage += '🔐 인증 오류\n';
+                errorMessage += 'API 키가 올바르지 않거나 만료되었습니다.\n';
+                errorMessage += 'API 키 설정을 다시 확인해주세요.\n\n';
+            } else if (error.message.includes('403') || error.message.includes('Forbidden')) {
+                errorMessage += '🚫 권한 오류\n';
+                errorMessage += 'API 사용 권한이 없거나 할당량을 초과했습니다.\n\n';
+            } else if (error.message.includes('429') || error.message.includes('Too Many Requests')) {
+                errorMessage += '⏱️ 요청 제한 초과\n';
+                errorMessage += '잠시 후 다시 시도해주세요.\n\n';
+            } else if (error.message.includes('413') || error.message.includes('too large')) {
+                errorMessage += '📦 파일 크기 초과\n';
+                errorMessage += '파일이 너무 큽니다. 더 작은 파일로 시도해주세요.\n\n';
+            }
+            
+            errorMessage += `상세 오류: ${error.message}`;
+            
+            // 진행 상태에 오류 표시
+            this.updateProgress(0, '❌ 자막 추출 실패', error.message);
+            
+            // 알림 표시
+            alert(errorMessage);
+            
+            // 상태 섹션에 오류 정보 유지
+            document.getElementById('statusDetails').innerHTML = `
+                <div style="color: var(--error-color, #f44336); margin-top: 10px;">
+                    <strong>오류 발생:</strong><br>
+                    ${error.message}<br><br>
+                    <small>콘솔에서 자세한 정보를 확인하세요.</small>
+                </div>
+            `;
+        } finally {
+            this.isProcessing = false;
+            document.getElementById('startTranscription').disabled = false;
+            document.getElementById('startTranscription').querySelector('.btn-text').textContent = '자막 추출 시작';
+            document.getElementById('cancelTranscription').style.display = 'none';
+        }
+    }
+

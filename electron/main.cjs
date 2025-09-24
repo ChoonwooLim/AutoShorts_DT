@@ -373,25 +373,59 @@ async function startProxyServer() {
 
   const upload = multer({ storage: multer.memoryStorage() });
 
-  // OpenAI Whisper 프록시
-  app.post('/proxy/openai/whisper', upload.single('file'), async (req, res) => {
-    try {
-      const formData = new FormData();
-      formData.append('file', req.file.buffer, {
-        filename: req.file.originalname,
-        contentType: req.file.mimetype
-      });
-      formData.append('model', req.body.model || 'whisper-1');
-      if (req.body.language) formData.append('language', req.body.language);
-      formData.append('response_format', 'verbose_json');
+  function extractApiKey(authHeader) {
+    if (!authHeader) {
+      return '';
+    }
+    if (authHeader.startsWith('Bearer ')) {
+      return authHeader.slice(7);
+    }
+    return authHeader;
+  }
 
+  async function forwardToOpenAIWhisper(req, res, apiKey) {
+    const resolvedKey = apiKey || '';
+    if (!resolvedKey) {
+      return res.status(401).json({ error: 'API key is required' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Audio file is required' });
+    }
+
+    let fileBuffer = req.file.buffer;
+    let tempPath = null;
+
+    if (!fileBuffer && req.file.path) {
+      tempPath = req.file.path;
+      fileBuffer = fs.readFileSync(req.file.path);
+    }
+
+    if (!fileBuffer) {
+      return res.status(400).json({ error: 'Invalid audio payload' });
+    }
+
+    const formData = new FormData();
+    formData.append('file', fileBuffer, {
+      filename: req.file.originalname || req.file.filename || 'audio.webm',
+      contentType: req.file.mimetype || 'audio/webm'
+    });
+    formData.append('model', req.body.model || 'whisper-1');
+
+    if (req.body.language) {
+      formData.append('language', req.body.language);
+    }
+
+    formData.append('response_format', req.body.response_format || 'verbose_json');
+
+    try {
       const response = await axios.post(
         'https://api.openai.com/v1/audio/transcriptions',
         formData,
         {
           headers: {
             ...formData.getHeaders(),
-            'Authorization': `Bearer ${req.body.apiKey}`
+            Authorization: `Bearer ${resolvedKey}`
           },
           maxBodyLength: Infinity
         }
@@ -399,13 +433,31 @@ async function startProxyServer() {
 
       res.json(response.data);
     } catch (error) {
+      const status = error.response?.status || 500;
+      const payload = error.response?.data || { error: error.message };
       console.error('OpenAI proxy error:', error.message);
-      res.status(error.response?.status || 500).json({
-        error: error.message
-      });
+      res.status(status).json(payload);
+    } finally {
+      if (tempPath) {
+        fs.unlink(tempPath, (unlinkErr) => {
+          if (unlinkErr) {
+            console.warn('Failed to remove temp audio file:', unlinkErr.message);
+          }
+        });
+      }
     }
+  }
+
+  const whisperUpload = upload.single('file');
+
+  app.post('/proxy/openai/whisper', whisperUpload, async (req, res) => {
+    await forwardToOpenAIWhisper(req, res, req.body.apiKey);
   });
 
+  app.post('/api/openai/transcriptions', whisperUpload, async (req, res) => {
+    const apiKey = extractApiKey(req.headers['authorization']) || req.body.apiKey;
+    await forwardToOpenAIWhisper(req, res, apiKey);
+  });
   proxyPort = await findAvailablePort([5001, 5002, 5003]);
   proxyServer = app.listen(proxyPort, () => {
     console.log(`Proxy server running on port ${proxyPort}`);
@@ -460,10 +512,13 @@ ipcMain.handle('ffmpeg:extract-audio', async (event, filePath) => {
     ffmpeg.on('close', (code) => {
       if (code === 0) {
         const buffer = fs.readFileSync(tempOutput);
-        fs.unlinkSync(tempOutput);
         
+        // 캐시 저장 (파일 삭제 전에!)
         const hash = crypto.createHash('md5').update(inputPath).digest('hex');
         writeCacheFromTemp(hash, tempOutput);
+        
+        // 이제 임시 파일 삭제
+        fs.unlinkSync(tempOutput);
         
         resolve(buffer);
       } else {
@@ -521,12 +576,12 @@ ipcMain.handle('ffmpeg:transcode', async (event, params) => {
 
 ipcMain.handle('audio:extract', async (event, params) => {
   const { videoPath, quality = 'medium' } = params;
-  const tempOutput = path.join(app.getPath('temp'), `audio_${Date.now()}.mp3`);
+  const tempOutput = path.join(app.getPath('temp'), `audio_${Date.now()}.opus`);
 
   const qualitySettings = {
-    low: { bitrate: '64k', sampleRate: 22050 },
-    medium: { bitrate: '128k', sampleRate: 44100 },
-    high: { bitrate: '192k', sampleRate: 48000 }
+    low: { bitrate: '16k', sampleRate: 8000 },     // 극저품질 (긴급용)
+    medium: { bitrate: '24k', sampleRate: 16000 },  // 음성 인식 최적 (Whisper 권장)
+    high: { bitrate: '32k', sampleRate: 16000 }     // 고품질 음성
   };
 
   const settings = qualitySettings[quality] || qualitySettings.medium;
@@ -534,11 +589,13 @@ ipcMain.handle('audio:extract', async (event, params) => {
   return new Promise((resolve, reject) => {
     const args = [
       '-i', videoPath,
-      '-vn',
-      '-acodec', 'libmp3lame',
+      '-vn',  // 비디오 제거
+      '-af', 'afftdn=nf=-25,highpass=f=300,lowpass=f=3000',  // 노이즈 제거 + 음성 필터
+      '-acodec', 'libopus',  // Opus 코덱 (음성에 최적화)
       '-b:a', settings.bitrate,
       '-ar', settings.sampleRate,
-      '-ac', '2',
+      '-ac', '1',  // 모노 (파일 크기 50% 감소)
+      '-application', 'voip',  // VoIP 모드 (음성 최적화)
       tempOutput
     ];
 
@@ -551,13 +608,31 @@ ipcMain.handle('audio:extract', async (event, params) => {
 
     ffmpeg.on('close', (code) => {
       if (code === 0 && fs.existsSync(tempOutput)) {
-        const buffer = fs.readFileSync(tempOutput);
-        fs.unlinkSync(tempOutput);
-        resolve({ 
-          success: true, 
-          data: buffer.toString('base64'),
-          size: buffer.length
-        });
+        const stats = fs.statSync(tempOutput);
+        const sizeMB = stats.size / (1024 * 1024);
+        console.log(`✅ 오디오 추출 완료: ${sizeMB.toFixed(2)}MB (원본 ${videoPath})`);
+        
+        // 10MB 이하만 Base64로 변환
+        if (stats.size <= 10 * 1024 * 1024) {
+          const buffer = fs.readFileSync(tempOutput);
+          fs.unlinkSync(tempOutput);
+          resolve({ 
+            success: true, 
+            data: buffer.toString('base64'),
+            size: stats.size,
+            format: 'base64'
+          });
+        } else {
+          // 대용량 파일은 경로만 반환 (메모리 절약)
+          console.log(`📁 대용량 파일 - 경로 반환: ${tempOutput}`);
+          resolve({ 
+            success: true, 
+            filePath: tempOutput,
+            size: stats.size,
+            format: 'file',
+            needsChunking: stats.size > 20 * 1024 * 1024
+          });
+        }
       } else {
         reject(new Error(`FFmpeg failed: ${errorOutput}`));
       }
@@ -567,13 +642,137 @@ ipcMain.handle('audio:extract', async (event, params) => {
   });
 });
 
+// 공통 extractAudio 함수로 분리
+async function extractAudio(videoPath, quality = 'medium') {
+  const tempOutput = path.join(app.getPath('temp'), `audio_${Date.now()}.opus`);
+
+  const qualitySettings = {
+    low: { bitrate: '16k', sampleRate: 8000 },
+    medium: { bitrate: '24k', sampleRate: 16000 },
+    high: { bitrate: '32k', sampleRate: 16000 }
+  };
+
+  const settings = qualitySettings[quality] || qualitySettings.medium;
+
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-i', videoPath,
+      '-vn',
+      '-af', 'afftdn=nf=-25,highpass=f=300,lowpass=f=3000',
+      '-acodec', 'libopus',
+      '-b:a', settings.bitrate,
+      '-ar', settings.sampleRate,
+      '-ac', '1',
+      '-application', 'voip',
+      tempOutput
+    ];
+
+    const ffmpeg = spawn(ffmpegPath, args);
+    let errorOutput = '';
+
+    ffmpeg.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0 && fs.existsSync(tempOutput)) {
+        const stats = fs.statSync(tempOutput);
+        const sizeMB = stats.size / (1024 * 1024);
+        console.log(`✅ 오디오 추출 완료: ${sizeMB.toFixed(2)}MB`);
+        
+        if (stats.size <= 10 * 1024 * 1024) {
+          const buffer = fs.readFileSync(tempOutput);
+          fs.unlinkSync(tempOutput);
+          resolve({ 
+            success: true, 
+            data: buffer.toString('base64'),
+            size: stats.size,
+            format: 'base64'
+          });
+        } else {
+          resolve({ 
+            success: true, 
+            filePath: tempOutput,
+            size: stats.size,
+            format: 'file',
+            needsChunking: stats.size > 20 * 1024 * 1024
+          });
+        }
+      } else {
+        reject(new Error(`FFmpeg failed: ${errorOutput}`));
+      }
+    });
+
+    ffmpeg.on('error', reject);
+  });
+}
+
 ipcMain.handle('audio:extract-from-path', async (event, params) => {
   const { filePath, quality = 'medium' } = params;
-  const result = await ipcMain.handle('audio:extract', event, { 
-    videoPath: filePath, 
-    quality 
-  });
-  return result;
+  try {
+    return await extractAudio(filePath, quality);
+  } catch (error) {
+    console.error('❌ Audio extraction failed:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// 스트리밍 파일 읽기 (메모리 효율적)
+ipcMain.handle('audio:read-file', async (event, filePath) => {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return { success: false, error: 'File not found' };
+    }
+    
+    const stats = fs.statSync(filePath);
+    
+    // 100MB 이하만 Base64로 변환 (안전 마진)
+    if (stats.size > 100 * 1024 * 1024) {
+      return { success: false, error: 'File too large for base64' };
+    }
+    
+    const buffer = fs.readFileSync(filePath);
+    return { 
+      success: true, 
+      data: buffer.toString('base64'),
+      size: stats.size 
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// 임시 파일 정리
+ipcMain.handle('audio:cleanup-temp', async (event, filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`🗑️ Temp file cleaned: ${filePath}`);
+    }
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// 오디오 청킹
+const AudioChunker = require('./audioChunker');
+ipcMain.handle('audio:chunk', async (event, params) => {
+  const { filePath, maxSize = 20 * 1024 * 1024 } = params;
+  
+  try {
+    const chunker = new AudioChunker(ffmpegPath, { maxChunkSize: maxSize });
+    const chunks = await chunker.chunkAudio(filePath);
+    
+    return { 
+      success: true, 
+      chunks: chunks,
+      needsMerge: chunks.length > 1
+    };
+  } catch (error) {
+    console.error('❌ Chunking failed:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('file:save-to-temp', async (event, params) => {

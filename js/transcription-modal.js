@@ -915,314 +915,44 @@ class TranscriptionModal {
                     const proxyPort = window.electronAPI && window.electronAPI.getProxyPort 
                         ? await window.electronAPI.getProxyPort() 
                         : 3003;
-                    proxyUrl = `http://localhost:${proxyPort}/api`;
+                    proxyUrl = `http://localhost:${proxyPort}`;
                 } else if (window.location.hostname === 'localhost') {
-                    proxyUrl = 'http://localhost:3001/api';
+                    proxyUrl = 'http://localhost:3001';
                 } else {
-                    proxyUrl = '/api';
+                    proxyUrl = '';
                 }
                 
-                const response = await fetch(`${proxyUrl}/openai/transcriptions`, {
+                // apiKey를 FormData에 추가 (Electron 프록시 요구사항)
+                const apiKey = await this.getApiKey('openai');
+
+            const cloneFormData = (source) => {
+                const copy = new FormData();
+                source.forEach((value, key) => {
+                    copy.append(key, value);
+                });
+                return copy;
+            };
+
+            const buildRequestOptions = (includeApiKey) => {
+                const payload = cloneFormData(formData);
+                if (includeApiKey) {
+                    payload.append('apiKey', apiKey);
+                }
+                return {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${await this.getApiKey('openai')}`
+                        'Authorization': `Bearer ${apiKey}`
                     },
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    console.error(`❌ 세그먼트 ${segmentNum} 처리 실패`);
-                    continue;
-                }
-                
-                const result = await response.json();
-                
-                // 세그먼트 타임스탬프 조정
-                if (result.segments) {
-                    const estimatedDuration = (audioData.size / totalSize) * 1200; // 전체 예상 시간 (초)
-                    const segmentDuration = estimatedDuration / segmentCount;
-                    const timeOffset = i * segmentDuration;
-                    
-                    result.segments = result.segments.map(seg => ({
-                        ...seg,
-                        start: (seg.start || 0) + timeOffset,
-                        end: (seg.end || 0) + timeOffset
-                    }));
-                    
-                    allSegments.push(...result.segments);
-                    lastEndTime = result.segments[result.segments.length - 1]?.end || lastEndTime;
-                } else {
-                    // 단순 텍스트인 경우
-                    allSegments.push({
-                        text: result.text || result,
-                        start: lastEndTime,
-                        end: lastEndTime + 60
-                    });
-                    lastEndTime += 60;
-                }
-                
-            } catch (error) {
-                console.error(`❌ 세그먼트 ${segmentNum} 처리 중 오류:`, error);
+                    body: payload
+                };
+            };
+
+            let response = await fetch(`${proxyUrl}/proxy/openai/whisper`, buildRequestOptions(true));
+
+            if (response.status === 404) {
+                console.warn('⚠️ Whisper proxy route missing. Falling back to /api/openai/transcriptions');
+                response = await fetch(`${proxyUrl}/api/openai/transcriptions`, buildRequestOptions(false));
             }
-        }
-        
-        // 모든 세그먼트 병합
-        const mergedResult = {
-            text: allSegments.map(s => s.text).join(' '),
-            segments: allSegments
-        };
-        
-        console.log(`✅ 총 ${allSegments.length}개 세그먼트 처리 완료`);
-        return mergedResult;
-    }
-
-    async extractAudio(file) {
-        console.log('🎵 오디오 추출 시작...');
-        
-        // 품질 설정 가져오기
-        const qualitySelect = document.getElementById('audioQuality');
-        const quality = qualitySelect ? qualitySelect.value : 'high'; // 기본값: 하이엔드
-        
-        // Electron 환경에서는 IPC를 통해 네이티브 FFmpeg 사용
-        if (window.electronAPI && window.electronAPI.extractAudio) {
-            try {
-                console.log('📦 네이티브 FFmpeg를 사용하여 오디오 추출 중...');
-                this.updateProgress(15, '네이티브 FFmpeg로 오디오 추출 중...', '대용량 파일 처리 중입니다.');
-                
-                console.log('📦 파일 크기:', (file.size / 1024 / 1024).toFixed(2), 'MB');
-                
-                // 파일 크기에 따라 다른 처리 방식 사용
-                
-                if (file.size > 10 * 1024 * 1024) {
-                    // 10MB 이상: File 객체의 path 속성 직접 사용 (Electron 환경)
-                    console.log('🔧 대용량 파일 - 파일 경로 직접 사용');
-                    
-                    // Electron 환경에서 File 객체는 path 속성을 가질 수 있음
-                    let filePath = null;
-                    
-                    // 방법 1: File 객체의 path 속성 확인
-                    if (file.path) {
-                        filePath = file.path;
-                        console.log('📍 File.path 사용:', filePath);
-                    } 
-                    // 방법 2: webkitRelativePath 확인
-                    else if (file.webkitRelativePath) {
-                        filePath = file.webkitRelativePath;
-                        console.log('📍 webkitRelativePath 사용:', filePath);
-                    }
-                    // 방법 3: Blob URL 생성 후 처리
-                    else {
-                        console.log('📁 Blob으로 임시 파일 생성 중...');
-                        
-                        // Blob URL 생성
-                        const blobUrl = URL.createObjectURL(file);
-                        
-                        // Electron의 nativeIO를 통해 파일 저장
-                        if (window.nativeIO && window.nativeIO.saveBlobToFile) {
-                            filePath = await window.nativeIO.saveBlobToFile({
-                                blobUrl: blobUrl,
-                                fileName: file.name
-                            });
-                            URL.revokeObjectURL(blobUrl);
-                        } else {
-                            // 폴백: FileReader 사용
-                            console.log('📝 FileReader로 파일 읽기...');
-                            const buffer = await file.arrayBuffer();
-                            const uint8Array = new Uint8Array(buffer);
-                            
-                            // 바이너리 데이터를 직접 전송
-                            const tempPath = await window.electronAPI.saveBinaryFile({
-                                fileName: file.name,
-                                buffer: buffer
-                            });
-                            filePath = tempPath;
-                        }
-                    }
-                    
-                    if (filePath) {
-                        console.log('📍 파일 경로:', filePath);
-                        
-                        // 파일 경로로 직접 오디오 추출
-                        const result = await window.electronAPI.extractAudioFromPath({
-                            filePath: filePath,
-                            fileName: file.name,
-                            quality: quality
-                        });
-                        
-                        if (result && result.success) {
-                            const binaryString = atob(result.audioData);
-                            const bytes = new Uint8Array(binaryString.length);
-                            for (let i = 0; i < binaryString.length; i++) {
-                                bytes[i] = binaryString.charCodeAt(i);
-                            }
-                            const audioBlob = new Blob([bytes], { type: 'audio/mp3' });
-                            console.log('✅ 대용량 파일 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
-                            return audioBlob;
-                        } else if (result && result.error) {
-                            console.error('❌ FFmpeg 오류:', result.error);
-                            throw new Error(result.error);
-                        }
-                    }
-                } else {
-                    // 10MB 미만: Base64로 변환하여 전송
-                    console.log('📤 일반 파일 - Base64 변환 후 전송');
-                    
-                    const arrayBuffer = await file.arrayBuffer();
-                    const uint8Array = new Uint8Array(arrayBuffer);
-                    
-                    // 청크 단위로 Base64 변환 (메모리 오버플로우 방지)
-                    const chunkSize = 65536; // 64KB 청크로 증가
-                    for (let i = 0; i < uint8Array.length; i += chunkSize) {
-                        const chunk = uint8Array.slice(i, i + chunkSize);
-                        base64 += btoa(String.fromCharCode.apply(null, chunk));
-                        
-                        // 진행률 업데이트
-                        if (i % (1024 * 1024) === 0) {
-                            const progress = Math.min(15 + (i / uint8Array.length) * 10, 25);
-                            this.updateProgress(progress, '파일 변환 중...', `${((i / uint8Array.length) * 100).toFixed(0)}% 완료`);
-                        }
-                    }
-                    
-                    // IPC를 통해 오디오 추출 요청
-                    const result = await window.electronAPI.extractAudio({
-                        videoData: base64,
-                        fileName: file.name,
-                        quality: quality
-                    });
-                    
-                    if (result && result.success) {
-                        const binaryString = atob(result.audioData);
-                        const bytes = new Uint8Array(binaryString.length);
-                        for (let i = 0; i < binaryString.length; i++) {
-                            bytes[i] = binaryString.charCodeAt(i);
-                        }
-                        const audioBlob = new Blob([bytes], { type: 'audio/mp3' });
-                        console.log('✅ 네이티브 FFmpeg로 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
-                        return audioBlob;
-                    }
-                }
-            } catch (error) {
-                console.error('❌ 네이티브 FFmpeg 오디오 추출 실패:', error);
-            }
-        }
-        
-        // FFmpeg.wasm을 사용한 오디오 추출 (브라우저 환경)
-        if (window.ffmpeg && window.ffmpeg.isLoaded) {
-            try {
-                console.log('📦 FFmpeg.wasm을 사용하여 오디오 추출 중...');
-                this.updateProgress(15, 'FFmpeg.wasm으로 오디오 추출 중...', '처리 중입니다.');
-                
-                // 파일을 ArrayBuffer로 읽기
-                const arrayBuffer = await file.arrayBuffer();
-                const uint8Array = new Uint8Array(arrayBuffer);
-                
-                // FFmpeg 파일 시스템에 비디오 파일 쓰기
-                await window.ffmpeg.FS('writeFile', 'input.mp4', uint8Array);
-                
-                // FFmpeg로 오디오 추출 (하이엔드 품질 최적화)
-                await window.ffmpeg.run(
-                    '-i', 'input.mp4',
-                    '-vn',  // 비디오 제거
-                    '-acodec', 'libmp3lame',  // MP3 코덱 사용
-                    '-ar', '24000',  // 24kHz 샘플레이트 (음성 명료도 향상)
-                    '-ac', '1',  // 모노 채널 (대화 중심 콘텐츠)
-                    '-b:a', '96k',  // 96kbps (고품질 음성 인식)
-                    '-q:a', '2',  // MP3 품질 설정 (0-9, 낮을수록 고품질)
-                    '-t', '1200',  // 최대 20분
-                    'output.mp3'
-                );
-                
-                // 결과 파일 읽기
-                const audioData = window.ffmpeg.FS('readFile', 'output.mp3');
-                
-                // 정리
-                window.ffmpeg.FS('unlink', 'input.mp4');
-                window.ffmpeg.FS('unlink', 'output.mp3');
-                
-                // Blob으로 변환
-                const audioBlob = new Blob([audioData.buffer], { type: 'audio/mp3' });
-                console.log('✅ FFmpeg.wasm으로 오디오 추출 완료:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
-                
-                return audioBlob;
-                
-            } catch (ffmpegError) {
-                console.error('❌ FFmpeg.wasm 오디오 추출 실패:', ffmpegError);
-                console.log('📡 대체 방법으로 시도 중...');
-            }
-        }
-        
-        // 최후의 방법: 파일 직접 전송 (오디오 추출 없이)
-        console.log('🎬 비디오 파일을 직접 전송합니다...');
-        this.updateProgress(15, '파일 준비 중...', '비디오 파일을 처리 중입니다.');
-        
-        // 파일 크기 정보 표시
-        const fileSizeMB = file.size / (1024 * 1024);
-        console.log(`📁 원본 파일 크기: ${fileSizeMB.toFixed(2)}MB`);
-        
-        // MP3 압축 정보 표시  
-        const estimatedMP3Size = (file.size * 0.01); // 대략 1% 크기로 압축 예상
-        console.log(`💡 MP3 압축 후 예상 크기: ${(estimatedMP3Size / 1024 / 1024).toFixed(2)}MB`);
-        console.log(`📊 압축 설정: 16kHz, 모노, 32kbps - 음성 인식에 최적화`);
-        
-        // 파일 그대로 반환 (오디오 추출은 FFmpeg가 처리)
-        return file;
-    }
-
-    async transcribeWithWhisper(audioData) {
-        this.updateProgress(30, 'OpenAI Whisper로 음성 인식 중...', '고정밀 AI 모델로 처리 중입니다.');
-
-        // 파일 크기 확인 및 분할 처리
-        const maxSize = 24 * 1024 * 1024; // 24MB (API 제한보다 약간 작게)
-        const audioSize = audioData.size;
-        
-        if (audioSize > maxSize) {
-            console.log(`🔄 큰 파일 감지 (${(audioSize / 1024 / 1024).toFixed(2)}MB) - 분할 처리 중...`);
-            return await this.transcribeWithWhisperSegments(audioData);
-        }
-
-        const formData = new FormData();
-        formData.append('file', audioData, 'audio.webm');
-        formData.append('model', 'whisper-1');
-        
-        const language = document.getElementById('whisperLanguage').value;
-        if (language !== 'auto') {
-            formData.append('language', language);
-        }
-
-        // 타임스탬프와 함께 상세 정보 요청
-        if (document.getElementById('whisperTimestamps').checked) {
-            formData.append('response_format', 'verbose_json');
-            formData.append('timestamp_granularities', 'segment');
-        }
-        
-        // 프롬프트 추가 - 음악 구간도 포함하여 전사
-        formData.append('prompt', '이 오디오에는 대화, 나레이션, 또는 음악이 포함되어 있을 수 있습니다. 모든 음성 내용을 정확하게 전사해주세요.');
-
-        // 프록시 서버 URL 설정 (로컬 개발 환경)
-        // Electron 환경에서는 내장 프록시 서버 사용
-        let proxyUrl;
-        if (window.env && window.env.isElectron) {
-            // Electron 환경에서는 동적으로 프록시 포트 가져오기
-            const proxyPort = window.electronAPI && window.electronAPI.getProxyPort 
-                ? await window.electronAPI.getProxyPort() 
-                : 3003;
-            proxyUrl = `http://localhost:${proxyPort}/api`;
-            console.log(`🔗 Using Electron proxy on port ${proxyPort}`);
-        } else if (window.location.hostname === 'localhost') {
-            proxyUrl = 'http://localhost:3001/api';  // 개발 환경
-        } else {
-            proxyUrl = '/api'; // 프로덕션에서는 같은 도메인 사용
-        }
-
-        if (document.getElementById('whisperTranslate').checked) {
-            // 번역 엔드포인트 사용 (프록시 경유)
-            const response = await fetch(`${proxyUrl}/openai/translations`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${await this.getApiKey('openai')}`
-                },
-                body: formData
-            });
 
             if (!response.ok) {
                 const errorData = await response.text();
@@ -1233,11 +963,12 @@ class TranscriptionModal {
             return await response.json();
         } else {
             // 전사 엔드포인트 사용 (프록시 경유)
-            const response = await fetch(`${proxyUrl}/openai/transcriptions`, {
+            // apiKey를 FormData에 추가 (Electron 프록시 요구사항)
+            const apiKey = await this.getApiKey('openai');
+            formData.append('apiKey', apiKey);
+            
+            const response = await fetch(`${proxyUrl}/proxy/openai/whisper`, {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${await this.getApiKey('openai')}`
-                },
                 body: formData
             });
 
