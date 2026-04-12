@@ -1,5 +1,24 @@
 # Claude Development Notes
 
+## AI 공유 리소스 (WORK/ 프로젝트 공통 — SSOT)
+
+> **단일 진실 원천**: `C:\WORK\infra-docs\ai-shared-registry.md` — 먼저 읽고 따를 것.
+
+- Steven의 모든 WORK/ 프로젝트는 동일 AI 인프라를 공유 (로컬 LLM/이미지 서버 + 유료 API 키 공용).
+- **AI/GPU 전용 서버**: `twinverse-ai` = `192.168.219.117` (Threadripper 3970X + RTX 3090 24GB + Ubuntu 24.04)
+  - Ollama LLM → `http://192.168.219.117:11434` (qwen2.5 / mistral / llava / OpenAI-compatible)
+  - Flux.1-schnell 이미지 → `http://192.168.219.117:8100` (ai-image-service, systemd, ✅ 운영)
+  - Real-ESRGAN / rembg / SimpleLama inpaint 엔드포인트 포함
+- **GPU PC** `192.168.219.100` = UE5 Pixel Streaming 전담. 새 AI 배치 금지.
+- **Orbitron** `192.168.219.101` = 배포 + PostgreSQL + 미디어. AI 서빙 금지.
+- 환경변수 이름은 레지스트리 §5 그대로: `AI_GPU_SERVER_URL`, `OLLAMA_URL`, `{PROVIDER}_API_KEY` 등. `localhost` 금지.
+- API 키 실제 값은 레지스트리/코드에 기입 금지 — **Orbitron secrets만** 사용.
+- ⚠️ **2026-04-12 HW 경고**: twinverse-ai 연속 Flux 생성 중 전압 스파이크 리부팅(HW 미수리). 대량 Flux 사용 전 Steven 확인 필수. 상세: 레지스트리 §3.2.3.
+- ⚠️ **Flux 실행 모드 고정**: RTX 3090 24GB에서는 `enable_sequential_cpu_offload` + `bfloat16` 이 최적(A/B 실측). native `.to("cuda")` OOM, `model_cpu_offload` 2배 느림. 레지스트리 §3.2.2.
+- AI 관련 변경(키/포트/모델/엔드포인트) 시 **레지스트리 먼저 → 그다음 코드**. 한쪽만 업데이트 금지.
+
+---
+
 ## Project Information
 - **Project Name**: AutoShorts_DT
 - **Location**: C:\WORK\AutoShorts_DT
